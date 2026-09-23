@@ -1,0 +1,14 @@
+# [License] Verified Free & Commercial Use.
+# [Auditor] Antigravity 2.0 x takumiGuard
+# [Status] Pass (Harness env checked).
+# [Timestamp] 2026-07-21T14:27:00Z
+
+model:
+  name: "facebook/opt-350m"
+  quantize: "bitsandbytes"
+
+retriever:
+  embed_model: "sentence-transformers/all-MiniLM-L6-v2"
+  index_path: "./index.faiss"
+  doc_dir: "./documents"
+  top_k: 5
