@@ -97,7 +97,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
               <div
                 className={`max-w-[85%] md:max-w-[75%] rounded-2xl p-4 shadow-sm text-sm relative ${
                   msg.role === 'user'
-                    ? 'bg-indigo-600 text-white rounded-br-none'
+                    ? 'user-message-bubble bg-indigo-600 text-white rounded-br-none'
                     : 'bg-slate-900 border border-slate-800 text-slate-200 rounded-bl-none'
                 }`}
               >
@@ -145,7 +145,9 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
                 {/* 本文 (Markdown対応) */}
                 <div
-                  className="prose prose-invert prose-sm max-w-none leading-relaxed"
+                  className={`prose prose-sm max-w-none leading-relaxed ${
+                    msg.role === 'user' ? 'text-white [&_*]:!text-white' : 'prose-invert text-slate-200'
+                  }`}
                   dangerouslySetInnerHTML={{ __html: marked.parse(msg.content) as string }}
                 />
 

@@ -299,11 +299,84 @@ class RAGManager {
       if (!seenParents.has(chunk.parentContent)) {
         seenParents.add(chunk.parentContent);
         collectedText += `\n\n【出典: ${chunk.docTitle}】\n${chunk.parentContent}`;
-        if (collectedText.length >= 8000) break;
+        if (collectedText.length >= 24000) break;
       }
     }
 
     return collectedText.trim() || '（選択されたドキュメント本文がありません）';
+  }
+
+  // 選択されたドキュメントの全コンテキストを長文でも網羅的に構築（チャット用）
+  public async getComprehensiveContext(
+    projectId: string,
+    enabledDocIds: string[],
+    maxChars: number = 36000
+  ): Promise<{ contextText: string; sources: SourceReference[]; totalChars: number; docTitles: string[] }> {
+    const allChunks = await dbService.getChunksByProject(projectId);
+    const enabledSet = new Set(enabledDocIds);
+    const activeChunks = allChunks.filter(c => enabledSet.has(c.docId));
+
+    if (activeChunks.length === 0) {
+      return { contextText: '', sources: [], totalChars: 0, docTitles: [] };
+    }
+
+    // ドキュメントごとにグループ化して順序維持
+    const docGroups = new Map<string, { title: string; parentBlocks: Map<string, string>; chunks: DocumentChunk[] }>();
+    for (const chunk of activeChunks) {
+      if (!docGroups.has(chunk.docId)) {
+        docGroups.set(chunk.docId, {
+          title: chunk.docTitle,
+          parentBlocks: new Map(),
+          chunks: []
+        });
+      }
+      const group = docGroups.get(chunk.docId)!;
+      group.chunks.push(chunk);
+      if (!group.parentBlocks.has(chunk.parentContent)) {
+        group.parentBlocks.set(chunk.parentContent, chunk.parentContent);
+      }
+    }
+
+    let combinedText = '';
+    const sources: SourceReference[] = [];
+    const docTitles: string[] = [];
+    let totalChars = 0;
+
+    let docIndex = 1;
+    for (const [docId, group] of docGroups.entries()) {
+      docTitles.push(group.title);
+      const docHeader = `\n\n================================================================\n📄 【ドキュメント ${docIndex}/${docGroups.size}】: ${group.title}\n================================================================\n`;
+      let docBody = '';
+
+      for (const parentBlock of group.parentBlocks.values()) {
+        if ((combinedText.length + docBody.length + parentBlock.length) > maxChars) {
+          docBody += `\n...[長文上限のため以降省略]`;
+          break;
+        }
+        docBody += `${parentBlock}\n\n`;
+      }
+
+      combinedText += docHeader + docBody;
+      totalChars += docBody.length;
+
+      const firstChunk = group.chunks[0];
+      sources.push({
+        chunkId: firstChunk?.id || docId,
+        docTitle: group.title,
+        snippet: docBody.slice(0, 300),
+        fullContext: docBody.slice(0, 1500),
+        score: 1.0
+      });
+
+      docIndex++;
+    }
+
+    return {
+      contextText: combinedText.trim(),
+      sources,
+      totalChars,
+      docTitles
+    };
   }
 
   // Graph RAG トリプル関係性の抽出＆サマリー構築

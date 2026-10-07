@@ -269,24 +269,22 @@ export const App: React.FC = () => {
       const enabledDocIds = documents.filter(d => d.enabled).map(d => d.id);
       let searchResults: any[] = [];
       let graphSummary = '';
+      let fullDocsContext = '';
+      let totalContextChars = 0;
+      let activeDocTitles: string[] = [];
 
       if (enabledDocIds.length > 0) {
-        searchResults = await ragManager.search(query, enabledDocIds, 5);
-        if (searchResults.length > 0) {
-          graphSummary = ragManager.extractGraphRAGTriples(searchResults);
-        } else {
-          // 検索スコアで拾えなかった場合でも、チェックされたドキュメントの本文を確実に取得して参照ソースを構築
-          const fallbackText = await ragManager.getActiveDocsFullText(activeProject.id, enabledDocIds);
-          if (fallbackText && !fallbackText.includes('（選択されたドキュメント本文がありません）')) {
-            const enabledDocs = documents.filter(d => d.enabled);
-            searchResults = [{
-              chunkId: `fallback_${Date.now()}`,
-              docTitle: enabledDocs.map(d => d.title).join(', '),
-              snippet: fallbackText.slice(0, 300),
-              fullContext: fallbackText,
-              score: 0.95
-            }];
-          }
+        // 1. 選択された全ドキュメントの包括的コンテキスト（最大36,000文字）を丸ごと抽出
+        const comp = await ragManager.getComprehensiveContext(activeProject.id, enabledDocIds, 36000);
+        fullDocsContext = comp.contextText;
+        totalContextChars = comp.totalChars;
+        activeDocTitles = comp.docTitles;
+        searchResults = comp.sources;
+
+        // 2. クエリ特化のハイブリッド検索（特定箇所フォーカス用）
+        const focusedHits = await ragManager.search(query, enabledDocIds, 5);
+        if (focusedHits.length > 0) {
+          graphSummary = ragManager.extractGraphRAGTriples(focusedHits);
         }
       }
 
@@ -299,13 +297,13 @@ export const App: React.FC = () => {
           throw new Error('選択されたドキュメント内に関連する該当箇所が見つかりませんでした。');
         }
 
-        let directContent = `### 🎯 厳密RAG 抽出結果 (直接合致・検索ヒット)\n\n`;
-        directContent += `選択された **${enabledDocIds.length}** 件のドキュメントから該当箇所を抽出しました。\n\n`;
+        let directContent = `### 🎯 厳密RAG 抽出結果 (選択資料: ${activeDocTitles.join(', ')})\n\n`;
+        directContent += `選択された **${enabledDocIds.length}** 件のドキュメント (計 ${totalContextChars.toLocaleString()} 文字) から該当コンテキストを抽出しました。\n\n`;
 
         searchResults.forEach((r, idx) => {
-          directContent += `#### 📄 [${idx + 1}] ${r.docTitle} (適合度: ${(r.score * 100).toFixed(0)}%)\n`;
+          directContent += `#### 📄 [${idx + 1}] ${r.docTitle}\n`;
           directContent += `> ${r.snippet}\n\n`;
-          directContent += `<details><summary>前後の親コンテキストを表示</summary>\n\n${r.fullContext}\n\n</details>\n\n---\n\n`;
+          directContent += `<details><summary>ドキュメント本文コンテキストを展開</summary>\n\n${r.fullContext}\n\n</details>\n\n---\n\n`;
         });
 
         if (graphSummary) {
@@ -327,21 +325,19 @@ export const App: React.FC = () => {
         return;
       }
 
-      // 🤖 通常AI回答モードの場合 (ドキュメント根拠を最優先)
+      // 🤖 通常AI回答モード (長文ドキュメント完全把握・NotebookLM型グラウンディング)
       let systemPrompt = '';
-      if (searchResults.length > 0) {
-        const contextText = searchResults
-          .map((r, i) => `[資料 ${i + 1}: ${r.docTitle}]\n${r.fullContext}`)
-          .join('\n\n---\n\n');
-        systemPrompt = `あなたはNotebookLMのように、ユーザーが指定した【参照ドキュメント】を厳密に読解・分析して回答する専任AIアシスタントです。
+      if (fullDocsContext) {
+        systemPrompt = `あなたはGoogle NotebookLMのように、ユーザーから提供された【参照ドキュメント】の内容を完璧に読解・分析して回答する専任AIアシスタントです。
 
 【最重要原則】
-1. 回答は必ず以下の【参照ドキュメント】に書かれている具体的な内容、数値、用語、事実を唯一の根拠として作成してください。
-2. 回答時には「ドキュメント【${searchResults[0]?.docTitle}】によると」「資料の記述に基づき」のように出典や引用を明記してください。
-3. ドキュメントに記載のない事柄については「ドキュメント内に該当する記述が見つかりません」と明記し、決して勝手な推測や一般的な知識だけで答えを作らないでください。
+1. あなたの知識の源泉は、以下の【参照ドキュメント】に記載された全情報です。
+2. ユーザーの質問に対して、ドキュメントに書かれている事実、決定事項、数値、用語、文脈を徹底的に読み解き、網羅的かつ具体的に回答してください。
+3. 回答時には「ドキュメント【${activeDocTitles[0]}】によると...」のように資料名を根拠として明示してください。
+4. ドキュメント内に一切記述のない事柄を問われた場合のみ、「提供されたドキュメントには記載がありません」と明確に区別して回答してください。
 
-【参照ドキュメント】
-${contextText}
+【参照ドキュメント (選択中: ${activeDocTitles.join(', ')} / 計 ${totalContextChars.toLocaleString()} 文字)】
+${fullDocsContext}
 
 ${graphSummary ? `【ナレッジネットワーク関係性】\n${graphSummary}` : ''}`;
       } else {
@@ -361,10 +357,10 @@ ${graphSummary ? `【ナレッジネットワーク関係性】\n${graphSummary}
       };
 
       setMessages(prev => [...prev, assistantMsg]);
-      setStatusMessage('回答を生成中...');
+      setStatusMessage(`ドキュメント (${activeDocTitles.length}件) を解析して回答生成中...`);
 
-      const userPromptWithContext = searchResults.length > 0
-        ? `【質問】${query}\n\n(※上記の提供ドキュメントの内容に基づいて、具体的な事実や用語を引用しながら日本語で回答してください)`
+      const userPromptWithContext = fullDocsContext
+        ? `【質問】${query}\n\n(※上記の提供ドキュメント【${activeDocTitles.join(', ')}】の内容をすべて把握した上で、質問に対する回答を具体的に漏れなく網羅して日本語で答えてください)`
         : query;
 
       const chatHistory: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
