@@ -21,15 +21,25 @@ interface PCRecommendedModel {
   moe?: boolean;
 }
 
+interface PCRecommendedModel {
+  category: string;
+  name: string;
+  filename: string;
+  spec: 'ram32_vram8' | 'ram16_cpu';
+  size: string;
+  desc: string;
+  moe?: boolean;
+}
+
 const PC_RECOMMENDED_MODELS: PCRecommendedModel[] = [
-  // 💻 RAM 32GB + VRAM 8GB 向け (GPU高速オフロード + 大容量メモリ)
+  // 💻 RAM 32GB + VRAM 8GB 向け (WebGPUブラウザ内・GPUオフロード推奨)
   {
-    category: '🔥 RAM 32GB / VRAM 8GB (GPU+大容量RAM推奨)',
-    name: 'Qwen 2.5 14B Instruct (Q4_K_M)',
-    filename: 'qwen2.5-14b-instruct-q4_k_m.gguf',
+    category: '🔥 RAM 32GB / VRAM 8GB (ブラウザ高速動作・標準8B推奨)',
+    name: 'Llama 3.1 8B / Swallow 8B (Q4_K_M)',
+    filename: 'Llama-3.1-Swallow-8B-Instruct-v0.5-Q4_K_M.gguf',
     spec: 'ram32_vram8',
-    size: '約9.0 GB',
-    desc: '日本語理解・論理的思考・RAG精度が極めて高く、8GB VRAMで半分以上をGPUに載せて高速動作可能。'
+    size: '約4.9 GB',
+    desc: '【ブラウザ内推奨上限】8GB VRAMに余裕で収まり、ブラウザ単体（Python不要）でもWebGPUで高速推論が可能。日本語QAの精度も最高峰。'
   },
   {
     category: '🔥 RAM 32GB / VRAM 8GB (MoEモデル推奨)',
@@ -37,43 +47,26 @@ const PC_RECOMMENDED_MODELS: PCRecommendedModel[] = [
     filename: 'qwen1.5-moe-a2.7b-chat-q4_k_m.gguf',
     spec: 'ram32_vram8',
     size: '約8.8 GB',
-    desc: '【MoE推奨】総パラメータ14.3B中、稼働時は2.7Bのみを活性化。7B並の高速レスポンスと14B級の精度を両立。',
+    desc: '【MoE推奨】総パラメータ14.3B中、推論時は2.7Bのみを活性化。ブラウザのVRAM負荷を最小限に抑えつつ高精度を実現。',
     moe: true
   },
   {
-    category: '🔥 RAM 32GB / VRAM 8GB (MoEモデル推奨)',
-    name: 'Mixtral 8x7B Instruct (Q2_K / Q3_K_M)',
-    filename: 'mixtral-8x7b-instruct-v0.1.Q3_K_M.gguf',
-    spec: 'ram32_vram8',
-    size: '約18.5 GB',
-    desc: '【大容量MoE】32GB RAMを活用してロード。総47Bパラメータから2エキスパート(13B)を活性化し高精度要約。',
-    moe: true
-  },
-  {
-    category: '🔥 RAM 32GB / VRAM 8GB (標準Dense推奨)',
-    name: 'Llama 3.1 8B Instruct (Q4_K_M)',
-    filename: 'llama-3.1-8b-instruct-q4_k_m.gguf',
-    spec: 'ram32_vram8',
-    size: '約4.9 GB',
-    desc: '8GB VRAMに100%全レイヤーをGPU搭載可能（秒速50+ tokensの爆速ストリーミング）。'
-  },
-
-  // 💡 RAM 16GB のみ (CPUメイン / 内蔵GPU向け)
-  {
-    category: '⚡ RAM 16GBのみ (CPU/内蔵GPU推奨)',
+    category: '🔥 RAM 32GB / VRAM 8GB (高精度7B)',
     name: 'Qwen 2.5 7B Instruct (Q4_K_M)',
     filename: 'qwen2.5-7b-instruct-q4_k_m.gguf',
-    spec: 'ram16_cpu',
+    spec: 'ram32_vram8',
     size: '約4.7 GB',
-    desc: '16GB RAM環境の絶対的スタンダード。空きメモリ約5GBで収まり、CPU推論でも快適にRAG要約が可能。'
+    desc: 'コード生成・長文コンテキスト・RAG要約に非常に強い。WebGPU環境で快適に動作する鉄板モデル。'
   },
+
+  // ⚡ RAM 16GB のみ (CPU/軽量GPU向け)
   {
     category: '⚡ RAM 16GBのみ (軽量MoE / A2B・A3B)',
     name: 'DeepSeek-V2-Lite MoE (Q4_K_M)',
     filename: 'deepseek-v2-lite-chat-q4_k_m.gguf',
     spec: 'ram16_cpu',
     size: '約9.5 GB',
-    desc: '【軽量MoE】総16B中、活性化2.4B(A2.4B)。16GB RAMの限界まで活用して高い推論能力を発揮。',
+    desc: '【軽量MoE】総16B中、活性化2.4B(A2.4B)。ブラウザのメモリ上限内で安定動作し、高い論理処理を発揮。',
     moe: true
   },
   {
@@ -82,9 +75,18 @@ const PC_RECOMMENDED_MODELS: PCRecommendedModel[] = [
     filename: 'llama-3.2-3b-instruct-q4_k_m.gguf',
     spec: 'ram16_cpu',
     size: '約2.0 GB',
-    desc: 'メモリ消費わずか2GB。他のアプリを開きながらでもCPUのみで瞬時に応答する超軽量モデル。'
+    desc: 'メモリ消費わずか2GB。ブラウザのタブを開いたままでもメモリ不足にならず、CPUのみで瞬時に応答する超軽量モデル。'
+  },
+  {
+    category: '⚡ RAM 16GBのみ (日本語特化・超軽量)',
+    name: 'Qwen 2.5 1.5B Instruct (Q4_K_M)',
+    filename: 'qwen2.5-1.5b-instruct-q4_k_m.gguf',
+    spec: 'ram16_cpu',
+    size: '約1.1 GB',
+    desc: '1.5Bの極小サイズながら日本語理解に優れ、メモリをほとんど消費せずにサクサク動きます。'
   }
 ];
+
 
 interface LocalModelItem {
 
@@ -128,10 +130,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 }) => {
   const [selectedSpecTab, setSelectedSpecTab] = useState<'ram32_vram8' | 'ram16_cpu'>('ram32_vram8');
 
-  const [folderPath, setFolderPath] = useState<string>(config.desktopModelPath || './models');
   const [scannedModels, setScannedModels] = useState<LocalModelItem[]>([]);
   const [isScanning, setIsScanning] = useState<boolean>(false);
   const [scanError, setScanError] = useState<string | null>(null);
+
 
   // モバイルダウンロード状態管理
   const [downloadProgress, setDownloadProgress] = useState<string | null>(null);
@@ -153,8 +155,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const handleScanModels = async (customFolder?: string) => {
     setIsScanning(true);
     setScanError(null);
-    const targetFolder = customFolder !== undefined ? customFolder : folderPath;
+    const targetFolder = customFolder !== undefined ? customFolder : (config.desktopModelPath || './models');
     const endpoint = config.desktopApiEndpoint || 'http://127.0.0.1:11434';
+
 
     try {
       const res = await fetch(`${endpoint.replace(/\/+$/, '')}/api/models/scan?folder=${encodeURIComponent(targetFolder)}`);
@@ -190,11 +193,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     onChangeConfig({
       ...config,
       desktopModelName: modelName,
-      desktopModelPath: folderPath,
       tuningProfile: targetProfile,
       temperature: autoTune && targetProfile ? targetProfile.temperature : config.temperature
     });
   };
+
 
   // モバイルWebLLMモデルのダウンロード＆初期化
   const handleDownloadAndInitWebLLM = async (modelId: string) => {
@@ -342,41 +345,58 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </button>
             </div>
 
-            {/* フォルダーパス指定 */}
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="text-[10px] text-slate-400">モデル格納フォルダーパス (GGUF / Bin)</label>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const defaultPath = 'C:\\MYP\\github-sub-01\\minibookLM\\models';
-                    setFolderPath(defaultPath);
-                    handleScanModels(defaultPath);
-                  }}
-                  className="text-[10px] text-cyan-400 hover:text-cyan-300 underline font-medium"
-                >
-                  📁 このプロジェクトのmodelsフォルダを指定
-                </button>
+            {/* 📁 ローカルGGUFファイル直接選択（Python不要・ブラウザ完結） */}
+            <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-200">📂 PC内のGGUFファイルを直接読み込み (Python不要)</span>
               </div>
-              <div className="flex space-x-2">
-                <input
-                  type="text"
-                  value={folderPath}
-                  onChange={(e) => setFolderPath(e.target.value)}
-                  placeholder="C:\MYP\github-sub-01\minibookLM\models または ./models"
-                  className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-cyan-500 font-mono"
-                />
-                <button
-                  onClick={() => handleScanModels(folderPath)}
-                  className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs font-bold transition-all shadow-md shadow-cyan-600/20"
-                >
-                  検出
-                </button>
+              <p className="text-[11px] text-slate-400">
+                お使いのPCにある <code>.gguf</code> ファイル（例: <code>Llama-3.1-Swallow-8B...gguf</code>）をブラウザで直接選択して推論エンジンに設定します。
+              </p>
+              
+              <div className="flex items-center space-x-2">
+                <label className="cursor-pointer flex items-center space-x-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-cyan-600/20">
+                  <Folder className="w-4 h-4" />
+                  <span>GGUFファイルを選択する</span>
+                  <input
+                    type="file"
+                    accept=".gguf,.bin"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        const sizeMb = Math.round(file.size / (1024 * 1024));
+                        const newModel: LocalModelItem = {
+                          name: file.name,
+                          size_mb: sizeMb,
+                          type: 'local-file',
+                          profile: {
+                            category: file.name.toLowerCase().includes('moe') ? 'MoE (Mixture of Experts)' : 'Dense GGUF (Browser Direct)',
+                            context_window: 4096,
+                            temperature: 0.3,
+                            top_p: 0.85,
+                            repeat_penalty: 1.1,
+                            n_gpu_layers: 99,
+                            rag_top_k: 4,
+                            description: 'ブラウザWebGPU直接実行: Pythonサーバー不要・完全オフライン動作'
+                          }
+                        };
+                        setScannedModels(prev => [newModel, ...prev.filter(m => m.name !== file.name)]);
+                        applyModelWithAutoTune(file.name, newModel.profile);
+                      }
+                    }}
+                  />
+                </label>
+
+                {config.desktopModelName && (
+                  <div className="flex items-center space-x-1.5 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-3 py-1.5 rounded-xl font-mono">
+                    <Check className="w-3.5 h-3.5" />
+                    <span>選択中: {config.desktopModelName}</span>
+                  </div>
+                )}
               </div>
-              <span className="text-[10px] text-slate-500 block mt-1">
-                ※ 指定したフォルダ内にある <code>.gguf</code> ファイルが自動的に下のプルダウンに表示されます。
-              </span>
             </div>
+
 
 
             {/* モデル選択プルダウン */}
