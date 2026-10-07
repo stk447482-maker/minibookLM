@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { X, Smartphone, Laptop, Sparkles, Check, Cloud, Key, Folder, RefreshCw, Zap, Download, Database } from 'lucide-react';
 import { ModelConfig, ModelMode, ModelTuningProfile } from '../types/index.ts';
+
 
 import { llmService } from '../services/llmService.ts';
 
@@ -139,47 +140,34 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [downloadProgress, setDownloadProgress] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState<boolean>(false);
 
-  useEffect(() => {
-    if (isOpen && config.mode === 'desktop-api') {
-      handleScanModels();
-    }
-  }, [isOpen, config.mode]);
-
-  if (!isOpen) return null;
-
-  const handleModeSelect = (mode: ModelMode) => {
-    onChangeConfig({ ...config, mode });
-  };
-
-  // PCモデルフォルダのスキャン実行
+  // PCモデルフォルダのスキャン実行 (Ollama/ローカルAPI接続時のみ)
   const handleScanModels = async (customFolder?: string) => {
     setIsScanning(true);
     setScanError(null);
     const targetFolder = customFolder !== undefined ? customFolder : (config.desktopModelPath || './models');
     const endpoint = config.desktopApiEndpoint || 'http://127.0.0.1:11434';
 
-
     try {
       const res = await fetch(`${endpoint.replace(/\/+$/, '')}/api/models/scan?folder=${encodeURIComponent(targetFolder)}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}: サーバー応答エラー`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       
       const allModels: LocalModelItem[] = [
         ...(data.local_gguf_files || []),
         ...(data.ollama_models || [])
       ];
-      setScannedModels(allModels);
-
-      // もし現在選択されているモデルが空、かつ見つかったモデルがあれば自動設定
-      if (allModels.length > 0 && !config.desktopModelName) {
-        applyModelWithAutoTune(allModels[0].name, allModels[0].profile);
-      }
-    } catch (err: any) {
-      setScanError(`モデルスキャン失敗: ${err.message || 'server.pyが起動していません'}`);
+      setScannedModels(prev => {
+        const localFiles = prev.filter(m => m.type === 'local-file');
+        return [...localFiles, ...allModels.filter(m => !localFiles.some(l => l.name === m.name))];
+      });
+    } catch {
+      // Pythonが起動していなくてもブラウザ完結(File API)で動くためエラー表示は出さない
+      setScanError(null);
     } finally {
       setIsScanning(false);
     }
   };
+
 
   // モデル選択時、自動チューニングプロファイルを適用
   const applyModelWithAutoTune = (modelName: string, profile?: ModelTuningProfile) => {
@@ -217,7 +205,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
+  if (!isOpen) return null;
+
+  const handleModeSelect = (mode: ModelMode) => {
+    onChangeConfig({ ...config, mode });
+  };
+
   return (
+
     <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-xl w-full p-6 shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between border-b border-slate-800 pb-3">
