@@ -13,7 +13,12 @@ for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":3005" ^| findstr "LISTENING
 )
 
 :: デスクトップAPIサーバー (server.py) を最小化で起動
-start "MiniBookLM API Server" /min python server.py
+if exist "venv\Scripts\python.exe" (
+    start "MiniBookLM API Server" /min "venv\Scripts\python.exe" server.py
+) else (
+    start "MiniBookLM API Server" /min python server.py
+)
+
 
 echo サーバー起動完了時にブラウザが自動的に開きます...
 echo (終了時はこの黒い画面を閉じてください)
