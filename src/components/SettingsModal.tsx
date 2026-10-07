@@ -344,23 +344,40 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
             {/* フォルダーパス指定 */}
             <div>
-              <label className="text-[10px] text-slate-400 block mb-1">モデル格納フォルダーパス (GGUF / Bin)</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-[10px] text-slate-400">モデル格納フォルダーパス (GGUF / Bin)</label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const defaultPath = 'C:\\MYP\\github-sub-01\\minibookLM\\models';
+                    setFolderPath(defaultPath);
+                    handleScanModels(defaultPath);
+                  }}
+                  className="text-[10px] text-cyan-400 hover:text-cyan-300 underline font-medium"
+                >
+                  📁 このプロジェクトのmodelsフォルダを指定
+                </button>
+              </div>
               <div className="flex space-x-2">
                 <input
                   type="text"
                   value={folderPath}
                   onChange={(e) => setFolderPath(e.target.value)}
-                  placeholder="./models または C:\LLM_Models"
+                  placeholder="C:\MYP\github-sub-01\minibookLM\models または ./models"
                   className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-cyan-500 font-mono"
                 />
                 <button
                   onClick={() => handleScanModels(folderPath)}
-                  className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs font-bold"
+                  className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs font-bold transition-all shadow-md shadow-cyan-600/20"
                 >
                   検出
                 </button>
               </div>
+              <span className="text-[10px] text-slate-500 block mt-1">
+                ※ 指定したフォルダ内にある <code>.gguf</code> ファイルが自動的に下のプルダウンに表示されます。
+              </span>
             </div>
+
 
             {/* モデル選択プルダウン */}
             <div>
