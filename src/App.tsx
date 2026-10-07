@@ -267,21 +267,25 @@ export const App: React.FC = () => {
 
     try {
       const enabledDocIds = documents.filter(d => d.enabled).map(d => d.id);
+      let searchResults: any[] = [];
+      let graphSummary = '';
 
-      if (enabledDocIds.length === 0) {
-        throw new Error('左側のドキュメント一覧で、参照したい資料のチェックボックスを1つ以上選択してください。');
+      if (enabledDocIds.length > 0) {
+        searchResults = await ragManager.search(query, enabledDocIds, 5);
+        if (searchResults.length > 0) {
+          graphSummary = ragManager.extractGraphRAGTriples(searchResults);
+        }
       }
-
-      const searchResults = await ragManager.search(query, enabledDocIds, 5);
-
-      if (searchResults.length === 0) {
-        throw new Error('選択されたドキュメント内に関連する情報が見つかりませんでした。');
-      }
-
-      const graphSummary = ragManager.extractGraphRAGTriples(searchResults);
 
       // 🎯 厳密RAG直接抽出モードの場合
       if (isDirectRAG) {
+        if (enabledDocIds.length === 0) {
+          throw new Error('厳密RAG直接抽出を行うには、左側のドキュメント一覧で対象の資料にチェックを入れてください。');
+        }
+        if (searchResults.length === 0) {
+          throw new Error('選択されたドキュメント内に関連する該当箇所が見つかりませんでした。');
+        }
+
         let directContent = `### 🎯 厳密RAG 抽出結果 (直接合致・検索ヒット)\n\n`;
         directContent += `選択された **${enabledDocIds.length}** 件のドキュメントから該当箇所を抽出しました。\n\n`;
 
@@ -311,13 +315,18 @@ export const App: React.FC = () => {
       }
 
       // 🤖 通常AI回答モードの場合
-      const contextText = searchResults
-        .map((r, i) => `[Source ${i + 1}: ${r.docTitle}]\n${r.fullContext}`)
-        .join('\n\n---\n\n');
-
-      const systemPrompt = `あなたは正確無比なAI研究アシスタントです。以下の提供された【参照ドキュメント】に記載された情報のみを根拠として、親切かつ論理的に日本語で回答してください。ドキュメントに記載のない事柄については「ドキュメント内に該当する記述が見つかりません」と明確に回答し、決して推測で答えを作らないでください。\n\n【参照ドキュメント】\n${contextText}\n\n${graphSummary ? `【ナレッジネットワーク関係性】\n${graphSummary}` : ''}`;
+      let systemPrompt = '';
+      if (searchResults.length > 0) {
+        const contextText = searchResults
+          .map((r, i) => `[Source ${i + 1}: ${r.docTitle}]\n${r.fullContext}`)
+          .join('\n\n---\n\n');
+        systemPrompt = `あなたは正確無比なAI研究アシスタントです。以下の提供された【参照ドキュメント】に記載された情報のみを根拠として、親切かつ論理的に日本語で回答してください。ドキュメントに記載のない事柄については「ドキュメント内に該当する記述が見つかりません」と明確に回答し、決して推測で答えを作らないでください。\n\n【参照ドキュメント】\n${contextText}\n\n${graphSummary ? `【ナレッジネットワーク関係性】\n${graphSummary}` : ''}`;
+      } else {
+        systemPrompt = `あなたは親切で博識なAIアシスタントです。ユーザーの質問に対して論理的かつ分かりやすい日本語で丁寧に回答してください。`;
+      }
 
       const assistantMsgId = `asst_${Date.now()}`;
+
       const assistantMsg: ChatMessage = {
         id: assistantMsgId,
         projectId: activeProject.id,

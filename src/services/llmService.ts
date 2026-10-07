@@ -155,35 +155,36 @@ class LLMService {
     }
   }
 
-  // 3. メイン・ストリーミングディスパッチャー（完全脱モック）
+  // 3. メイン・ストリーミングディスパッチャー（完全脱モック＆自律フォールバック）
   public async *streamChat(
     messages: { role: 'system' | 'user' | 'assistant'; content: string }[],
     config: ModelConfig,
     onInitProgress?: (text: string) => void
   ): AsyncIterable<string> {
-    // ☁️ クラウド Gemini API モード
-    if (config.mode === 'cloud-gemini' || (config.cloudApiKey && config.mode !== 'embedded-mobile' && config.mode !== 'desktop-api')) {
+    // ☁️ クラウド Gemini API モード（またはAPIキー設定時）
+    if (config.mode === 'cloud-gemini' || config.cloudApiKey) {
       if (!config.cloudApiKey) {
-        throw new Error('Google Gemini APIキーが設定されていません。ヘッダーの「⚙️設定」からAPIキーを入力してください。');
+        throw new Error('Google Gemini APIキーが未入力です。「⚙️設定」からAPIキーを入力するか、ブラウザ内推論（WebLLM）をお選びください。');
       }
       yield* this.streamGeminiDirect(config.cloudApiKey, config.desktopModelName || 'gemini-1.5-flash', messages, config.temperature);
       return;
     }
 
-    // 💻 デスクトップ API モード (Ollama / Llama.cpp / server.py)
-    if (config.mode === 'desktop-api' || config.mode === 'desktop-gguf') {
-      const endpoint = config.desktopApiEndpoint || 'http://localhost:11434';
-      const model = config.desktopModelName || 'llama3.1';
-      yield* this.streamDesktopApi(endpoint, model, messages, config.temperature);
-      return;
+    // 💻 デスクトップ API モードでローカルOllamaが起動している場合は接続を試行
+    if (config.mode === 'desktop-api' && config.desktopApiEndpoint) {
+      try {
+        const endpoint = config.desktopApiEndpoint || 'http://127.0.0.1:11434';
+        const model = config.desktopModelName || 'llama3.1';
+        yield* this.streamDesktopApi(endpoint, model, messages, config.temperature);
+        return;
+      } catch {
+        // Ollama未起動の場合は自動でブラウザ内WebGPU (WebLLM) へフォールバック
+        onInitProgress?.('ローカルAPI未検出のため、ブラウザ内WebGPU推論へ自動切替中...');
+      }
     }
 
-    // 📱 モバイル・ブラウザ内 WebGPU (WebLLM) モード
-    if (config.mode === 'embedded-mobile') {
-      if (typeof navigator === 'undefined' || !('gpu' in navigator) || !(navigator as any).gpu) {
-        throw new Error('お使いのブラウザは WebGPU に対応していないか無効になっています。「⚙️設定」から「💻 デスクトップ仕様」または「☁️ Gemini API」を選択してください。');
-      }
-
+    // 📱/💻 ブラウザ内 WebGPU (WebLLM) 推論モード（Python不要・完全ブラウザ完結）
+    if (typeof navigator !== 'undefined' && 'gpu' in navigator && (navigator as any).gpu) {
       const modelId = config.embeddedModelId || 'Qwen2.5-0.5B-Instruct-q4f16_1-MLC';
       if (!this.engine || this.currentModelId !== modelId) {
         onInitProgress?.(`WebLLMモデル (${modelId}) をロード中...`);
@@ -192,23 +193,25 @@ class LLMService {
         });
       }
 
-      if (!this.engine) throw new Error('WebLLMエンジンの初期化に失敗しました');
+      if (this.engine) {
+        const chunks = await this.engine.chat.completions.create({
+          messages,
+          temperature: config.temperature,
+          stream: true
+        });
 
-      const chunks = await this.engine.chat.completions.create({
-        messages,
-        temperature: config.temperature,
-        stream: true
-      });
-
-      for await (const chunk of chunks) {
-        const delta = chunk.choices[0]?.delta?.content || '';
-        if (delta) yield delta;
+        for await (const chunk of chunks) {
+          const delta = chunk.choices[0]?.delta?.content || '';
+          if (delta) yield delta;
+        }
+        return;
       }
-      return;
     }
 
-    throw new Error('有効な推論モードが選択されていません。「⚙️設定」をご確認ください。');
+    // WebGPUが非対応環境の場合の明確な案内
+    throw new Error('ブラウザのWebGPUが非対応または未ロードです。「⚙️設定」から「☁️ Google Gemini API (無料)」のAPIキーを入力していただくか、WebGPU対応ブラウザ（Chrome/Edge最新版）をご利用ください。');
   }
+
 }
 
 export const llmService = new LLMService();
