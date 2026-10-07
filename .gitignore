@@ -6,3 +6,21 @@ __pycache__/
 .env
 index.faiss
 index.faiss.meta
+
+# Node.js & Vite
+node_modules/
+dist/
+dist-ssr/
+*.local
+tsconfig.tsbuildinfo
+
+# AI Models (大容量バイナリ)
+models/
+*.gguf
+*.bin
+*.onnx
+*.safetensors
+
+# Firebase
+.firebase/
+firebase-debug.log
