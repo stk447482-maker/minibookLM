@@ -306,11 +306,12 @@ class RAGManager {
     return collectedText.trim() || '（選択されたドキュメント本文がありません）';
   }
 
-  // 選択されたドキュメントの全コンテキストを長文でも網羅的に構築（チャット用）
+  // 選択されたドキュメントの全コンテキストをモデルのトークン枠に応じて動的最適化
   public async getComprehensiveContext(
     projectId: string,
     enabledDocIds: string[],
-    maxChars: number = 36000
+    maxChars: number = 3000,
+    query: string = ''
   ): Promise<{ contextText: string; sources: SourceReference[]; totalChars: number; docTitles: string[] }> {
     const allChunks = await dbService.getChunksByProject(projectId);
     const enabledSet = new Set(enabledDocIds);
@@ -337,20 +338,47 @@ class RAGManager {
       }
     }
 
+    // クエリがある場合は、関連度の高いチャンクを優先取得
+    let topRelevantHits: SourceReference[] = [];
+    if (query && query.trim()) {
+      try {
+        topRelevantHits = await this.search(query, enabledDocIds, 4);
+      } catch {}
+    }
+
     let combinedText = '';
     const sources: SourceReference[] = [];
     const docTitles: string[] = [];
     let totalChars = 0;
 
+    // 1. クエリに最も適合したフォーカス箇所を先頭に配置（最重要コンテキスト）
+    if (topRelevantHits.length > 0) {
+      combinedText += `### 🔍 【質問に最も関連する該当箇所抜粋】\n`;
+      for (const hit of topRelevantHits) {
+        if ((combinedText.length + hit.fullContext.length) < (maxChars * 0.6)) {
+          combinedText += `\n【資料: ${hit.docTitle}】\n${hit.fullContext}\n`;
+          sources.push(hit);
+        }
+      }
+      combinedText += `\n---\n`;
+    }
+
+    // 2. 残りの文字数枠で各ドキュメントの全体コンテキストを公平に配分
+    const remainingBudget = Math.max(800, maxChars - combinedText.length);
+    const budgetPerDoc = Math.floor(remainingBudget / Math.max(1, docGroups.size));
+
     let docIndex = 1;
     for (const [docId, group] of docGroups.entries()) {
       docTitles.push(group.title);
-      const docHeader = `\n\n================================================================\n📄 【ドキュメント ${docIndex}/${docGroups.size}】: ${group.title}\n================================================================\n`;
+      const docHeader = `\n📄 【ドキュメント ${docIndex}/${docGroups.size}】: ${group.title}\n`;
       let docBody = '';
 
       for (const parentBlock of group.parentBlocks.values()) {
-        if ((combinedText.length + docBody.length + parentBlock.length) > maxChars) {
-          docBody += `\n...[長文上限のため以降省略]`;
+        if ((docBody.length + parentBlock.length) > budgetPerDoc) {
+          const sliceLen = budgetPerDoc - docBody.length;
+          if (sliceLen > 100) {
+            docBody += `${parentBlock.slice(0, sliceLen)}...\n`;
+          }
           break;
         }
         docBody += `${parentBlock}\n\n`;
@@ -359,14 +387,16 @@ class RAGManager {
       combinedText += docHeader + docBody;
       totalChars += docBody.length;
 
-      const firstChunk = group.chunks[0];
-      sources.push({
-        chunkId: firstChunk?.id || docId,
-        docTitle: group.title,
-        snippet: docBody.slice(0, 300),
-        fullContext: docBody.slice(0, 1500),
-        score: 1.0
-      });
+      if (!sources.some(s => s.docTitle === group.title)) {
+        const firstChunk = group.chunks[0];
+        sources.push({
+          chunkId: firstChunk?.id || docId,
+          docTitle: group.title,
+          snippet: docBody.slice(0, 200),
+          fullContext: docBody.slice(0, 1000),
+          score: 1.0
+        });
+      }
 
       docIndex++;
     }
@@ -374,7 +404,7 @@ class RAGManager {
     return {
       contextText: combinedText.trim(),
       sources,
-      totalChars,
+      totalChars: combinedText.length,
       docTitles
     };
   }

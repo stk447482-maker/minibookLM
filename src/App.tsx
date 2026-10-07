@@ -273,16 +273,26 @@ export const App: React.FC = () => {
       let totalContextChars = 0;
       let activeDocTitles: string[] = [];
 
+      // モデル種別に応じた安全なトークン枠（WebGPUブラウザ: 2,500文字, Gemini: 60,000文字, デスクトップAPI: 12,000文字）
+      let maxContextChars = 2500;
+      if (config.mode === 'cloud-gemini') {
+        maxContextChars = 60000;
+      } else if (config.mode === 'desktop-api') {
+        maxContextChars = 12000;
+      } else if (config.mode === 'desktop-gguf') {
+        maxContextChars = 8000;
+      }
+
       if (enabledDocIds.length > 0) {
-        // 1. 選択された全ドキュメントの包括的コンテキスト（最大36,000文字）を丸ごと抽出
-        const comp = await ragManager.getComprehensiveContext(activeProject.id, enabledDocIds, 36000);
+        // 1. 選択された全ドキュメントの包括的コンテキストをモデルの許容文字数内で動的抽出
+        const comp = await ragManager.getComprehensiveContext(activeProject.id, enabledDocIds, maxContextChars, query);
         fullDocsContext = comp.contextText;
         totalContextChars = comp.totalChars;
         activeDocTitles = comp.docTitles;
         searchResults = comp.sources;
 
         // 2. クエリ特化のハイブリッド検索（特定箇所フォーカス用）
-        const focusedHits = await ragManager.search(query, enabledDocIds, 5);
+        const focusedHits = await ragManager.search(query, enabledDocIds, 4);
         if (focusedHits.length > 0) {
           graphSummary = ragManager.extractGraphRAGTriples(focusedHits);
         }
@@ -360,12 +370,13 @@ ${graphSummary ? `【ナレッジネットワーク関係性】\n${graphSummary}
       setStatusMessage(`ドキュメント (${activeDocTitles.length}件) を解析して回答生成中...`);
 
       const userPromptWithContext = fullDocsContext
-        ? `【質問】${query}\n\n(※上記の提供ドキュメント【${activeDocTitles.join(', ')}】の内容をすべて把握した上で、質問に対する回答を具体的に漏れなく網羅して日本語で答えてください)`
+        ? `【質問】${query}\n\n(※上記の提供ドキュメント【${activeDocTitles.join(', ')}】の内容を把握した上で、質問に対する回答を日本語で答えてください)`
         : query;
 
+      const recentMessages = config.mode === 'embedded-mobile' ? messages.slice(-4) : messages.slice(-10);
       const chatHistory: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
         { role: 'system', content: systemPrompt },
-        ...messages.map(m => ({ role: m.role, content: m.content })),
+        ...recentMessages.map(m => ({ role: m.role, content: m.content })),
         { role: 'user', content: userPromptWithContext }
       ];
 
