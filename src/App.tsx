@@ -476,18 +476,36 @@ export const App: React.FC = () => {
     }
   };
 
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
+    const saved = localStorage.getItem('minibooklm_theme');
+    return saved !== null ? saved === 'dark' : true;
+  });
+
+  const toggleTheme = () => {
+    setIsDarkMode(prev => {
+      const next = !prev;
+      localStorage.setItem('minibooklm_theme', next ? 'dark' : 'light');
+      return next;
+    });
+  };
+
   if (!isAuthenticated) {
     return <AuthGate onAuthenticated={() => setIsAuthenticated(true)} />;
   }
 
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-slate-950 font-sans text-slate-100">
+    <div className={`flex flex-col h-screen w-screen overflow-hidden font-sans transition-colors duration-200 ${
+      isDarkMode ? 'bg-slate-950 text-slate-100' : 'light-mode bg-slate-50 text-slate-900'
+    }`}>
       <Header
         config={config}
         onOpenSettings={() => setIsSettingsOpen(true)}
         activeMobileTab={activeMobileTab}
         setActiveMobileTab={setActiveMobileTab}
+        isDarkMode={isDarkMode}
+        onToggleTheme={toggleTheme}
       />
+
 
       <main className="flex-1 flex overflow-hidden">
         {/* 左ペイン: ソース＆プロジェクト管理 */}

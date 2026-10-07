@@ -10,6 +10,71 @@
   }
 }
 
+/* ライトモード対応 */
+.light-mode {
+  --bg-main: #f8fafc;
+  --bg-card: #ffffff;
+  --bg-pane: #f1f5f9;
+  --border-color: #e2e8f0;
+  --text-main: #0f172a;
+  --text-muted: #64748b;
+  color: #0f172a;
+  background-color: #f8fafc;
+}
+
+.light-mode .bg-slate-950 {
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+.light-mode .bg-slate-900 {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #e2e8f0 !important;
+}
+
+.light-mode .bg-slate-900\/50,
+.light-mode .bg-slate-900\/40,
+.light-mode .bg-slate-900\/80 {
+  background-color: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+}
+
+.light-mode .bg-slate-950\/80,
+.light-mode .bg-slate-950\/70,
+.light-mode .bg-slate-950\/60 {
+  background-color: #f1f5f9 !important;
+  border-color: #cbd5e1 !important;
+}
+
+.light-mode .bg-slate-800,
+.light-mode .bg-slate-800\/70,
+.light-mode .bg-slate-800\/40,
+.light-mode .bg-slate-800\/30 {
+  background-color: #f1f5f9 !important;
+  border-color: #e2e8f0 !important;
+}
+
+.light-mode .text-slate-100,
+.light-mode .text-slate-200,
+.light-mode .text-slate-300 {
+  color: #0f172a !important;
+}
+
+.light-mode .text-slate-400,
+.light-mode .text-slate-500 {
+  color: #64748b !important;
+}
+
+.light-mode .border-slate-800,
+.light-mode .border-slate-800\/80,
+.light-mode .border-slate-700,
+.light-mode .border-slate-700\/80,
+.light-mode .border-slate-700\/70,
+.light-mode .border-slate-700\/50 {
+  border-color: #e2e8f0 !important;
+}
+
 /* スクロールバーのカスタマイズ */
 ::-webkit-scrollbar {
   width: 6px;
@@ -19,9 +84,10 @@
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(148, 163, 184, 0.4);
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.4);
+  background: rgba(100, 116, 139, 0.6);
 }
+

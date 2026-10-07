@@ -1,5 +1,5 @@
 import React from 'react';
-import { Smartphone, Laptop, Settings, Sparkles } from 'lucide-react';
+import { Smartphone, Laptop, Settings, Sparkles, Sun, Moon } from 'lucide-react';
 import { ModelConfig } from '../types/index.ts';
 
 interface HeaderProps {
@@ -7,13 +7,17 @@ interface HeaderProps {
   onOpenSettings: () => void;
   activeMobileTab: 'docs' | 'chat' | 'studio';
   setActiveMobileTab: (tab: 'docs' | 'chat' | 'studio') => void;
+  isDarkMode: boolean;
+  onToggleTheme: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   config,
   onOpenSettings,
   activeMobileTab,
-  setActiveMobileTab
+  setActiveMobileTab,
+  isDarkMode,
+  onToggleTheme
 }) => {
   return (
     <header className="h-16 border-b border-slate-800 bg-slate-900/80 backdrop-blur px-4 flex items-center justify-between select-none">
@@ -60,6 +64,15 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       <div className="flex items-center space-x-2">
+        {/* ☀️ / 🌙 テーマ切り替えボタン */}
+        <button
+          onClick={onToggleTheme}
+          className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700/70 text-slate-300 hover:text-amber-400 transition-colors shadow-sm"
+          title={isDarkMode ? 'ライトモードに切り替え' : 'ダークモードに切り替え'}
+        >
+          {isDarkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-indigo-400" />}
+        </button>
+
         <button
           onClick={onOpenSettings}
           className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700/70 text-xs font-medium text-slate-200 transition-colors shadow-sm"
@@ -81,3 +94,4 @@ export const Header: React.FC<HeaderProps> = ({
     </header>
   );
 };
+
