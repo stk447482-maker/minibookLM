@@ -11,7 +11,83 @@ interface SettingsModalProps {
   onChangeConfig: (newConfig: ModelConfig) => void;
 }
 
+interface PCRecommendedModel {
+  category: string;
+  name: string;
+  filename: string;
+  spec: 'ram16_cpu' | 'ram32_vram8';
+  size: string;
+  desc: string;
+  moe?: boolean;
+}
+
+const PC_RECOMMENDED_MODELS: PCRecommendedModel[] = [
+  // 💻 RAM 32GB + VRAM 8GB 向け (GPU高速オフロード + 大容量メモリ)
+  {
+    category: '🔥 RAM 32GB / VRAM 8GB (GPU+大容量RAM推奨)',
+    name: 'Qwen 2.5 14B Instruct (Q4_K_M)',
+    filename: 'qwen2.5-14b-instruct-q4_k_m.gguf',
+    spec: 'ram32_vram8',
+    size: '約9.0 GB',
+    desc: '日本語理解・論理的思考・RAG精度が極めて高く、8GB VRAMで半分以上をGPUに載せて高速動作可能。'
+  },
+  {
+    category: '🔥 RAM 32GB / VRAM 8GB (MoEモデル推奨)',
+    name: 'Qwen 1.5 MoE A2.7B (Q4_K_M)',
+    filename: 'qwen1.5-moe-a2.7b-chat-q4_k_m.gguf',
+    spec: 'ram32_vram8',
+    size: '約8.8 GB',
+    desc: '【MoE推奨】総パラメータ14.3B中、稼働時は2.7Bのみを活性化。7B並の高速レスポンスと14B級の精度を両立。',
+    moe: true
+  },
+  {
+    category: '🔥 RAM 32GB / VRAM 8GB (MoEモデル推奨)',
+    name: 'Mixtral 8x7B Instruct (Q2_K / Q3_K_M)',
+    filename: 'mixtral-8x7b-instruct-v0.1.Q3_K_M.gguf',
+    spec: 'ram32_vram8',
+    size: '約18.5 GB',
+    desc: '【大容量MoE】32GB RAMを活用してロード。総47Bパラメータから2エキスパート(13B)を活性化し高精度要約。',
+    moe: true
+  },
+  {
+    category: '🔥 RAM 32GB / VRAM 8GB (標準Dense推奨)',
+    name: 'Llama 3.1 8B Instruct (Q4_K_M)',
+    filename: 'llama-3.1-8b-instruct-q4_k_m.gguf',
+    spec: 'ram32_vram8',
+    size: '約4.9 GB',
+    desc: '8GB VRAMに100%全レイヤーをGPU搭載可能（秒速50+ tokensの爆速ストリーミング）。'
+  },
+
+  // 💡 RAM 16GB のみ (CPUメイン / 内蔵GPU向け)
+  {
+    category: '⚡ RAM 16GBのみ (CPU/内蔵GPU推奨)',
+    name: 'Qwen 2.5 7B Instruct (Q4_K_M)',
+    filename: 'qwen2.5-7b-instruct-q4_k_m.gguf',
+    spec: 'ram16_cpu',
+    size: '約4.7 GB',
+    desc: '16GB RAM環境の絶対的スタンダード。空きメモリ約5GBで収まり、CPU推論でも快適にRAG要約が可能。'
+  },
+  {
+    category: '⚡ RAM 16GBのみ (軽量MoE / A2B・A3B)',
+    name: 'DeepSeek-V2-Lite MoE (Q4_K_M)',
+    filename: 'deepseek-v2-lite-chat-q4_k_m.gguf',
+    spec: 'ram16_cpu',
+    size: '約9.5 GB',
+    desc: '【軽量MoE】総16B中、活性化2.4B(A2.4B)。16GB RAMの限界まで活用して高い推論能力を発揮。',
+    moe: true
+  },
+  {
+    category: '⚡ RAM 16GBのみ (超高速・小型)',
+    name: 'Llama 3.2 3B Instruct (Q4_K_M)',
+    filename: 'llama-3.2-3b-instruct-q4_k_m.gguf',
+    spec: 'ram16_cpu',
+    size: '約2.0 GB',
+    desc: 'メモリ消費わずか2GB。他のアプリを開きながらでもCPUのみで瞬時に応答する超軽量モデル。'
+  }
+];
+
 interface LocalModelItem {
+
   name: string;
   rel_path?: string;
   full_path?: string;
@@ -50,6 +126,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   config,
   onChangeConfig
 }) => {
+  const [selectedSpecTab, setSelectedSpecTab] = useState<'ram32_vram8' | 'ram16_cpu'>('ram32_vram8');
+
   const [folderPath, setFolderPath] = useState<string>(config.desktopModelPath || './models');
   const [scannedModels, setScannedModels] = useState<LocalModelItem[]>([]);
   const [isScanning, setIsScanning] = useState<boolean>(false);
@@ -349,7 +427,61 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               )}
             </div>
 
+            {/* 📋 PC推奨モデル一覧ガイド（スペック別タブ切り替え） */}
+            <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3 space-y-2.5">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                <span className="text-xs font-bold text-slate-200">💡 PCスペック別・推奨AIモデル / MoEガイド</span>
+              </div>
+
+              {/* スペック切り替えタブ */}
+              <div className="grid grid-cols-2 gap-1.5 p-0.5 bg-slate-950 rounded-lg">
+                <button
+                  type="button"
+                  onClick={() => setSelectedSpecTab('ram32_vram8')}
+                  className={`py-1.5 px-2 rounded-md text-[11px] font-bold transition-all ${
+                    selectedSpecTab === 'ram32_vram8'
+                      ? 'bg-cyan-600 text-white shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  🔥 RAM 32GB / VRAM 8GB
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedSpecTab('ram16_cpu')}
+                  className={`py-1.5 px-2 rounded-md text-[11px] font-bold transition-all ${
+                    selectedSpecTab === 'ram16_cpu'
+                      ? 'bg-cyan-600 text-white shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  ⚡ RAM 16GBのみ (CPU)
+                </button>
+              </div>
+
+              {/* 推奨モデルリスト表示 */}
+              <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                {PC_RECOMMENDED_MODELS.filter(m => m.spec === selectedSpecTab).map((m, idx) => (
+                  <div key={idx} className="p-2.5 rounded-lg bg-slate-950/70 border border-slate-800/80 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-cyan-300">
+                        {m.moe ? '🧩 [MoE] ' : '🤖 '} {m.name}
+                      </span>
+                      <span className="text-[10px] font-mono bg-slate-800 px-1.5 py-0.5 rounded text-slate-300">
+                        {m.size}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-relaxed">{m.desc}</p>
+                    <div className="text-[10px] text-slate-500 font-mono flex items-center justify-between pt-0.5">
+                      <span>ファイル名例: {m.filename}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
             {scanError && (
+
               <p className="text-xs text-amber-400 bg-amber-500/10 border border-amber-500/30 p-2 rounded-lg">
                 ⚠️ {scanError}
               </p>
