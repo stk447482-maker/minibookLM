@@ -25,13 +25,26 @@ export const App: React.FC = () => {
     });
   }, []);
 
-  const [config, setConfig] = useState<ModelConfig>({
-    mode: 'desktop-api', // デフォルトでOllama / server.pyローカルAPIモード
-    embeddedModelId: 'Qwen2.5-0.5B-Instruct-q4f16_1-MLC',
-    desktopApiEndpoint: 'http://127.0.0.1:11434',
-    desktopModelName: 'llama3.1',
-    temperature: 0.3
+  const [config, setConfig] = useState<ModelConfig>(() => {
+    const saved = localStorage.getItem('minibooklm_model_config');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch {}
+    }
+    return {
+      mode: 'embedded-mobile', // デフォルトで完全ブラウザ完結WebGPUモード
+      embeddedModelId: 'Qwen2.5-0.5B-Instruct-q4f16_1-MLC',
+      desktopApiEndpoint: 'http://127.0.0.1:11434',
+      desktopModelName: 'llama3.1',
+      temperature: 0.3
+    };
   });
+
+  const handleUpdateConfig = (newConfig: ModelConfig) => {
+    setConfig(newConfig);
+    localStorage.setItem('minibooklm_model_config', JSON.stringify(newConfig));
+  };
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [activeMobileTab, setActiveMobileTab] = useState<'docs' | 'chat' | 'studio'>('chat');
@@ -273,14 +286,10 @@ export const App: React.FC = () => {
       let totalContextChars = 0;
       let activeDocTitles: string[] = [];
 
-      // モデル種別に応じた安全なトークン枠（WebGPUブラウザ: 2,500文字, Gemini: 60,000文字, デスクトップAPI: 12,000文字）
-      let maxContextChars = 2500;
-      if (config.mode === 'cloud-gemini') {
+      // モデル種別に応じた安全なトークン枠（WebGPUブラウザ: 2,000文字, Gemini: 60,000文字）
+      let maxContextChars = 2000;
+      if (config.mode === 'cloud-gemini' || config.cloudApiKey) {
         maxContextChars = 60000;
-      } else if (config.mode === 'desktop-api') {
-        maxContextChars = 12000;
-      } else if (config.mode === 'desktop-gguf') {
-        maxContextChars = 8000;
       }
 
       if (enabledDocIds.length > 0) {
@@ -606,7 +615,7 @@ ${graphSummary ? `【ナレッジネットワーク関係性】\n${graphSummary}
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
         config={config}
-        onChangeConfig={setConfig}
+        onChangeConfig={handleUpdateConfig}
       />
     </div>
   );

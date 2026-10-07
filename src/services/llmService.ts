@@ -194,8 +194,20 @@ class LLMService {
       }
 
       if (this.engine) {
+        // 🛡️ WebLLM 4,096 トークン上限（Context Window Overflow）絶対防止セーフティ
+        const safeMessages = messages.map((m) => {
+          let text = m.content;
+          // システムプロンプト（参照ドキュメント含む）は最大2,200文字に自動クランプ
+          if (m.role === 'system' && text.length > 2200) {
+            text = text.slice(0, 2200) + '\n...[WebGPU 4Kトークン制限のため以降省略]';
+          } else if (m.role !== 'system' && text.length > 1000) {
+            text = text.slice(0, 1000);
+          }
+          return { role: m.role, content: text };
+        });
+
         const chunks = await this.engine.chat.completions.create({
-          messages,
+          messages: safeMessages,
           temperature: config.temperature,
           stream: true
         });
