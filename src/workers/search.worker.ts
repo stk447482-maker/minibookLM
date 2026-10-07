@@ -160,7 +160,7 @@ self.onmessage = async (e: MessageEvent) => {
         }
       });
 
-      // 候補が少ない場合のフォールバック（直接部分一致チェック）
+      // 候補が少ない場合のフォールバック（直接部分一致チェックおよび全対象ドキュメントのチャンク網羅）
       if (candidateIds.size < 10) {
         const keywords = query.split(/[\s,、。]+/).filter(k => k.length >= 2);
         for (const [chunkId, chunk] of chunksStore.entries()) {
@@ -169,6 +169,16 @@ self.onmessage = async (e: MessageEvent) => {
             if (hasMatch) {
               candidateIds.add(chunkId);
               if (candidateIds.size >= 50) break;
+            }
+          }
+        }
+
+        // キーワード一致でも候補が拾えなかった場合（要約・概要・全般的な質問など）、選択されたドキュメントの全チャンクを候補に投入
+        if (candidateIds.size < 5) {
+          for (const [chunkId, chunk] of chunksStore.entries()) {
+            if (!allowedSet || allowedSet.has(chunk.docId)) {
+              candidateIds.add(chunkId);
+              if (candidateIds.size >= 100) break;
             }
           }
         }

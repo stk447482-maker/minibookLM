@@ -274,6 +274,19 @@ export const App: React.FC = () => {
         searchResults = await ragManager.search(query, enabledDocIds, 5);
         if (searchResults.length > 0) {
           graphSummary = ragManager.extractGraphRAGTriples(searchResults);
+        } else {
+          // 検索スコアで拾えなかった場合でも、チェックされたドキュメントの本文を確実に取得して参照ソースを構築
+          const fallbackText = await ragManager.getActiveDocsFullText(activeProject.id, enabledDocIds);
+          if (fallbackText && !fallbackText.includes('（選択されたドキュメント本文がありません）')) {
+            const enabledDocs = documents.filter(d => d.enabled);
+            searchResults = [{
+              chunkId: `fallback_${Date.now()}`,
+              docTitle: enabledDocs.map(d => d.title).join(', '),
+              snippet: fallbackText.slice(0, 300),
+              fullContext: fallbackText,
+              score: 0.95
+            }];
+          }
         }
       }
 
@@ -314,13 +327,23 @@ export const App: React.FC = () => {
         return;
       }
 
-      // 🤖 通常AI回答モードの場合
+      // 🤖 通常AI回答モードの場合 (ドキュメント根拠を最優先)
       let systemPrompt = '';
       if (searchResults.length > 0) {
         const contextText = searchResults
-          .map((r, i) => `[Source ${i + 1}: ${r.docTitle}]\n${r.fullContext}`)
+          .map((r, i) => `[資料 ${i + 1}: ${r.docTitle}]\n${r.fullContext}`)
           .join('\n\n---\n\n');
-        systemPrompt = `あなたは正確無比なAI研究アシスタントです。以下の提供された【参照ドキュメント】に記載された情報のみを根拠として、親切かつ論理的に日本語で回答してください。ドキュメントに記載のない事柄については「ドキュメント内に該当する記述が見つかりません」と明確に回答し、決して推測で答えを作らないでください。\n\n【参照ドキュメント】\n${contextText}\n\n${graphSummary ? `【ナレッジネットワーク関係性】\n${graphSummary}` : ''}`;
+        systemPrompt = `あなたはNotebookLMのように、ユーザーが指定した【参照ドキュメント】を厳密に読解・分析して回答する専任AIアシスタントです。
+
+【最重要原則】
+1. 回答は必ず以下の【参照ドキュメント】に書かれている具体的な内容、数値、用語、事実を唯一の根拠として作成してください。
+2. 回答時には「ドキュメント【${searchResults[0]?.docTitle}】によると」「資料の記述に基づき」のように出典や引用を明記してください。
+3. ドキュメントに記載のない事柄については「ドキュメント内に該当する記述が見つかりません」と明記し、決して勝手な推測や一般的な知識だけで答えを作らないでください。
+
+【参照ドキュメント】
+${contextText}
+
+${graphSummary ? `【ナレッジネットワーク関係性】\n${graphSummary}` : ''}`;
       } else {
         systemPrompt = `あなたは親切で博識なAIアシスタントです。ユーザーの質問に対して論理的かつ分かりやすい日本語で丁寧に回答してください。`;
       }
@@ -340,10 +363,14 @@ export const App: React.FC = () => {
       setMessages(prev => [...prev, assistantMsg]);
       setStatusMessage('回答を生成中...');
 
+      const userPromptWithContext = searchResults.length > 0
+        ? `【質問】${query}\n\n(※上記の提供ドキュメントの内容に基づいて、具体的な事実や用語を引用しながら日本語で回答してください)`
+        : query;
+
       const chatHistory: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
         { role: 'system', content: systemPrompt },
         ...messages.map(m => ({ role: m.role, content: m.content })),
-        { role: 'user', content: query }
+        { role: 'user', content: userPromptWithContext }
       ];
 
       const stream = llmService.streamChat(chatHistory, config, (prog) => {
