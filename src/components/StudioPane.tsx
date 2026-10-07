@@ -45,6 +45,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
 
   const tabs: { id: StudioTab; label: string; icon: React.ReactNode }[] = [
     { id: 'briefing', label: '要約', icon: <FileText className="w-3.5 h-3.5" /> },
+    { id: 'minutes', label: '会議議事録・ToDo', icon: <Clock className="w-3.5 h-3.5 text-amber-400" /> },
     { id: 'study_report', label: '詳細レポート', icon: <BookOpen className="w-3.5 h-3.5" /> },
     { id: 'faq', label: 'FAQ想定問答', icon: <HelpCircle className="w-3.5 h-3.5" /> },
     { id: 'learning_guide', label: '学習ガイド', icon: <Sparkles className="w-3.5 h-3.5" /> },
@@ -54,6 +55,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     { id: 'graph3d', label: '3Dナレッジグラフ', icon: <Network className="w-3.5 h-3.5" /> },
     { id: 'podcast', label: 'ポッドキャスト', icon: <Headphones className="w-3.5 h-3.5" /> }
   ];
+
 
   const tabArtifacts = artifacts
     .filter(a => a.type === activeTab)

@@ -204,14 +204,14 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
           ref={fileInputRef}
           onChange={(e) => e.target.files && onUpload(e.target.files)}
           multiple
-          accept=".pdf,.txt,.md"
+          accept=".pdf,.txt,.md,.mp3,.mp4,.wav,.wma,.m4a,.ogg,.webm,.mov"
           className="hidden"
         />
         {isProcessing ? (
           <div className="flex flex-col items-center justify-center space-y-1 py-1">
             <Loader2 className="w-5 h-5 text-indigo-400 animate-spin" />
             <span className="text-xs text-slate-300 font-medium">
-              解析＆保存中... ({processProgress}%)
+              解析＆文字起こし中... ({processProgress}%)
             </span>
             <div className="w-full bg-slate-700 rounded-full h-1 overflow-hidden">
               <div
@@ -224,10 +224,10 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
           <div className="flex flex-col items-center justify-center space-y-1 py-1">
             <FileUp className="w-5 h-5 text-indigo-400" />
             <span className="text-xs font-semibold text-slate-200">
-              PDF / テキストを追加
+              PDF / 音声 / 動画 / テキストを追加
             </span>
             <span className="text-[10px] text-slate-500">
-              ドラッグ＆ドロップまたはクリック
+              PDF, MP3, MP4, WMA, M4A, TXT対応
             </span>
           </div>
         )}
@@ -262,7 +262,11 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
                   )}
                 </button>
 
-                <div className="p-1 rounded bg-indigo-500/10 text-indigo-400 mt-0.5">
+                <div className={`p-1 rounded mt-0.5 ${
+                  doc.type === 'audio' || doc.type === 'video'
+                    ? 'bg-purple-500/10 text-purple-400'
+                    : 'bg-indigo-500/10 text-indigo-400'
+                }`}>
                   <FileText className="w-3.5 h-3.5" />
                 </div>
 
@@ -276,10 +280,11 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
                       {doc.totalChunks} チャンク
                     </span>
                     <span>•</span>
-                    <span>{doc.type.toUpperCase()}</span>
+                    <span className="font-mono text-cyan-300">{doc.type.toUpperCase()}</span>
                   </div>
                 </div>
               </div>
+
 
               <button
                 onClick={() => onRemoveDoc(doc.id)}

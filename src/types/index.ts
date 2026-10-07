@@ -51,7 +51,7 @@ export interface DocumentSource {
   id: string;
   projectId: string;
   title: string;
-  type: 'pdf' | 'text' | 'markdown' | 'web';
+  type: 'pdf' | 'text' | 'markdown' | 'web' | 'audio' | 'video';
   totalChunks: number;
   uploadedAt: number;
   contentPreview: string;
@@ -80,6 +80,7 @@ export interface ChatMessage {
 
 export type StudioTab =
   | 'briefing'
+  | 'minutes'
   | 'study_report'
   | 'faq'
   | 'learning_guide'
@@ -88,6 +89,7 @@ export type StudioTab =
   | 'flowchart'
   | 'podcast'
   | 'graph3d';
+
 
 export interface GraphNode {
   id: string;

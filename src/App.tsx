@@ -413,7 +413,11 @@ export const App: React.FC = () => {
       if (type === 'briefing') {
         title = customPrompt ? `要約: ${customPrompt.slice(0, 15)}...` : '総合要約ブリーフィング';
         prompt = `以下の資料内容から、重要な要点、概要、決定事項、背景を整理した要約ブリーフィング文書を作成してください。${userRequirement}\n\n資料内容:\n${fullContext}`;
+      } else if (type === 'minutes') {
+        title = customPrompt ? `議事録: ${customPrompt.slice(0, 15)}...` : '会議議事録・決定事項・ToDo';
+        prompt = `以下の資料（音声文字起こしや会議記録）から、ビジネス基準の高品質な【会議議事録】を作成してください。\n構成案:\n1. 議題・会議目的\n2. 決定事項 (Decisions)\n3. 議論の詳細・発言要点\n4. 持ち越し課題・次回検討事項\n5. アクションプラン / ToDo (担当者・期日・タスク一覧表)${userRequirement}\n\n資料内容:\n${fullContext}`;
       } else if (type === 'study_report') {
+
         title = customPrompt ? `レポート: ${customPrompt.slice(0, 15)}...` : '詳細研究・調査レポート';
         prompt = `以下の資料群を多角的に分析し、1. 概要・背景, 2. 主要な発見・要点分析, 3. 課題と解決策, 4. 総合結論 を含む詳細な研究・調査レポート(Markdown形式)を作成してください。${userRequirement}\n\n資料内容:\n${fullContext}`;
       } else if (type === 'faq') {
