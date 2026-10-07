@@ -41,6 +41,135 @@ class ChatRequest(BaseModel):
 def health():
     return {"status": "ok", "mode": "production-no-mock"}
 
+class ModelProfileRequest(BaseModel):
+    model_name: str
+    folder_path: Optional[str] = None
+
+# GGUF / モデル名からアーキテクチャ特性を判定し、最適パラメータを自動算出
+def auto_tune_model_profile(model_name: str, file_size_mb: Optional[float] = None) -> dict:
+    name_lower = model_name.lower()
+    
+    # 1. MoE (Mixture of Experts) 判定 (Mixtral, DeepSeek-MoE, Qwen-MoE, etc.)
+    is_moe = any(k in name_lower for k in ["moe", "mixtral", "8x7b", "8x22b", "a2b", "a3b", "expert"])
+    
+    # 2. パラメータ規模推定 (0.5B, 1.5B, 2B, 3B, 7B, 8B, 14B, 70B, etc.)
+    scale = "medium"
+    if any(k in name_lower for k in ["0.5b", "1b", "1.5b", "2b", "3b", "a2b", "a3b"]):
+        scale = "small"
+    elif any(k in name_lower for k in ["13b", "14b", "20b", "32b", "70b", "120b"]):
+        scale = "large"
+    elif is_moe:
+        scale = "moe"
+
+    # 3. プロファイル生成（コンテキスト長、温度、GPUオフロード、RAG検索件数）
+    if scale == "small":
+        profile = {
+            "category": "Small Dense (1B~3B / A2B / A3B)",
+            "context_window": 8192,
+            "temperature": 0.3,
+            "top_p": 0.85,
+            "repeat_penalty": 1.1,
+            "n_gpu_layers": 99,  # 小型モデルは全レイヤーVRAM投入
+            "rag_top_k": 3,
+            "description": "小型軽量モデル向け最適化: 全レイヤーGPU高速化 & 低温で幻覚抑制"
+        }
+    elif scale == "moe":
+        profile = {
+            "category": "MoE (Mixture of Experts)",
+            "context_window": 4096,
+            "temperature": 0.4,
+            "top_p": 0.9,
+            "repeat_penalty": 1.15,
+            "n_gpu_layers": 35,  # MoEはアクティブパラメータに応じてCPU/GPUバランス配分
+            "rag_top_k": 4,
+            "description": "MoEモデル向け最適化: CPU/GPU分散オフロード & スレッド競合防止"
+        }
+    elif scale == "large":
+        profile = {
+            "category": "Large Dense (14B~70B+)",
+            "context_window": 4096,
+            "temperature": 0.5,
+            "top_p": 0.9,
+            "repeat_penalty": 1.1,
+            "n_gpu_layers": 28,  # VRAM溢れ防止のための自動制限
+            "rag_top_k": 5,
+            "description": "大規模モデル向け最適化: メモリ使用量を制御しOOMを防止"
+        }
+    else:
+        # Standard 7B ~ 8B
+        profile = {
+            "category": "Standard Dense (7B~8B)",
+            "context_window": 8192,
+            "temperature": 0.3,
+            "top_p": 0.9,
+            "repeat_penalty": 1.1,
+            "n_gpu_layers": 99,
+            "rag_top_k": 4,
+            "description": "標準7B~8Bモデル向け最適化: 高速ストリーミング & バランス型RAG"
+        }
+
+    return profile
+
+@app.get("/api/models/scan")
+def scan_models(folder: Optional[str] = None):
+    # 指定フォルダーまたはデフォルトの models フォルダ
+    target_dir = os.path.abspath(folder) if folder and folder.strip() else os.path.abspath("./models")
+    if not os.path.exists(target_dir):
+        # フォルダが存在しない場合は作成
+        try:
+            os.makedirs(target_dir, exist_ok=True)
+        except Exception:
+            pass
+
+    found_models = []
+    if os.path.exists(target_dir) and os.path.isdir(target_dir):
+        for root, _, files in os.walk(target_dir):
+            for file in files:
+                if file.lower().endswith((".gguf", ".bin")):
+                    full_path = os.path.join(root, file)
+                    rel_path = os.path.relpath(full_path, target_dir)
+                    size_mb = round(os.path.getsize(full_path) / (1024 * 1024), 1)
+                    profile = auto_tune_model_profile(file, size_mb)
+                    found_models.append({
+                        "name": file,
+                        "rel_path": rel_path,
+                        "full_path": full_path,
+                        "size_mb": size_mb,
+                        "profile": profile
+                    })
+
+    # Ollamaが起動している場合はOllamaのタグ一覧も統合取得
+    ollama_models = []
+    try:
+        req = urllib.request.Request("http://127.0.0.1:11434/api/tags", headers={"User-Agent": "MiniBookLM"})
+        with urllib.request.urlopen(req, timeout=1.5) as response:
+            if response.status == 200:
+                data = json.loads(response.read().decode())
+                for m in data.get("models", []):
+                    m_name = m.get("name", "")
+                    size_mb = round(m.get("size", 0) / (1024 * 1024), 1)
+                    ollama_models.append({
+                        "name": m_name,
+                        "type": "ollama",
+                        "size_mb": size_mb,
+                        "profile": auto_tune_model_profile(m_name, size_mb)
+                    })
+    except Exception:
+        pass
+
+    return {
+        "status": "ok",
+        "scanned_directory": target_dir,
+        "local_gguf_files": found_models,
+        "ollama_models": ollama_models
+    }
+
+@app.post("/api/models/tune")
+def tune_model(req: ModelProfileRequest):
+    profile = auto_tune_model_profile(req.model_name)
+    return {"status": "ok", "model": req.model_name, "profile": profile}
+
+
 # 1. 本物の Ollama ストリーミングプロキシ
 async def stream_ollama(endpoint: str, model: str, messages: List[dict], options: Optional[dict]) -> AsyncGenerator[str, None]:
     ollama_url = f"{endpoint.rstrip('/')}/api/chat"

@@ -4,14 +4,29 @@
 
 export type ModelMode = 'embedded-mobile' | 'desktop-gguf' | 'desktop-api' | 'cloud-gemini';
 
+export interface ModelTuningProfile {
+  category: string;
+  context_window: number;
+  temperature: number;
+  top_p: number;
+  repeat_penalty: number;
+  n_gpu_layers: number;
+  rag_top_k: number;
+  description: string;
+}
+
 export interface ModelConfig {
   mode: ModelMode;
   embeddedModelId: string;
   desktopApiEndpoint?: string;
   desktopModelName?: string;
+  desktopModelPath?: string;
+  autoTuningEnabled?: boolean;
+  tuningProfile?: ModelTuningProfile;
   cloudApiKey?: string;
   temperature: number;
 }
+
 
 export interface Project {
   id: string;
