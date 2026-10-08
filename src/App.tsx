@@ -62,6 +62,7 @@ export const App: React.FC = () => {
 
   const [artifacts, setArtifacts] = useState<StudioArtifact[]>([]);
   const [isGeneratingStudio, setIsGeneratingStudio] = useState(false);
+  const [streamingStudioArtifact, setStreamingStudioArtifact] = useState<{ type: StudioTab; title: string; content: string } | null>(null);
 
   // 1. 初回マウント時: IndexedDBからプロジェクト復元
   useEffect(() => {
@@ -666,6 +667,12 @@ ${userRequirement}
 ${fullContext}`;
       }
 
+      setStreamingStudioArtifact({
+        type,
+        title,
+        content: ''
+      });
+
       const stream = llmService.streamChat(
         [
           { role: 'system', content: studioSystemPrompt },
@@ -677,6 +684,11 @@ ${fullContext}`;
       let content = '';
       for await (const chunk of stream) {
         content += chunk;
+        setStreamingStudioArtifact({
+          type,
+          title,
+          content
+        });
       }
 
       const newArtifact: StudioArtifact = {
@@ -689,13 +701,16 @@ ${fullContext}`;
         createdAt: Date.now()
       };
 
+      setStreamingStudioArtifact(null);
       setArtifacts(prev => [newArtifact, ...prev]);
       await dbService.saveArtifact(newArtifact);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       alert(`Studio生成エラー: ${msg}`);
+      setStreamingStudioArtifact(null);
     } finally {
       setIsGeneratingStudio(false);
+      setStreamingStudioArtifact(null);
     }
   };
 
@@ -783,6 +798,8 @@ ${fullContext}`;
         >
           <StudioPane
             artifacts={artifacts}
+            streamingArtifact={streamingStudioArtifact}
+            enabledDocsCount={documents.filter(d => d.enabled).length}
             onGenerate={handleGenerateStudio}
             onDeleteArtifact={handleDeleteArtifact}
             onAddToSource={handleAddContentToSource}

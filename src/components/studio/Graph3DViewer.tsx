@@ -17,8 +17,12 @@ export const Graph3DViewer: React.FC<Graph3DViewerProps> = ({ dataString }) => {
     let graphData: GraphData = { nodes: [], links: [] };
     try {
       // JSON形式のトリプルデータをパース
-      const cleanJson = dataString.replace(/```json/g, '').replace(/```/g, '').trim();
-      graphData = JSON.parse(cleanJson);
+      let cleanJson = dataString;
+      const match = dataString.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+      if (match) {
+        cleanJson = match[1];
+      }
+      graphData = JSON.parse(cleanJson.trim());
     } catch {
       // パース失敗時のフォールバック（シンプルなデモグラフ）
       graphData = {
