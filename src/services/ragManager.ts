@@ -73,44 +73,69 @@ class RAGManager {
     projectId: string
   ): DocumentChunk[] {
     const chunks: DocumentChunk[] = [];
-    const parentBlockSize = 900;
-    const parentOverlap = 150;
-    const childSnippetSize = 250;
-    const childOverlap = 50;
-
-    let parentStart = 0;
-    const textLen = text.length;
+    const paragraphs = text.split(/\n{2,}|\n(?=[#\-\*\d\>])/).filter(p => p.trim().length > 0);
+    
+    let currentParent = '';
     let chunkIndex = 0;
 
-    while (parentStart < textLen) {
-      const parentEnd = Math.min(parentStart + parentBlockSize, textLen);
-      const parentText = text.slice(parentStart, parentEnd).trim();
+    const flushParent = () => {
+      if (!currentParent.trim()) return;
+      const parentText = currentParent.trim();
+      
+      // 親ブロックから子チャンク（200-350文字の論理文単位）を生成
+      const sentences = parentText.split(/(?<=[。！？\n])/).filter(s => s.trim().length > 0);
+      let childSnippet = '';
 
-      let childStart = 0;
-      const parentLen = parentText.length;
-
-      while (childStart < parentLen) {
-        const childEnd = Math.min(childStart + childSnippetSize, parentLen);
-        const childText = parentText.slice(childStart, childEnd).trim();
-
-        if (childText.length > 25) {
+      for (const sent of sentences) {
+        if ((childSnippet.length + sent.length) > 300 && childSnippet.length > 30) {
           chunks.push({
             id: `${docId}_chunk_${chunkIndex++}`,
             projectId,
             docId,
             docTitle,
             chunkIndex,
-            content: childText,
+            content: childSnippet.trim(),
             parentContent: parentText
           });
+          childSnippet = '';
         }
-
-        if (childEnd >= parentLen) break;
-        childStart += childSnippetSize - childOverlap;
+        childSnippet += sent;
       }
 
-      if (parentEnd >= textLen) break;
-      parentStart += parentBlockSize - parentOverlap;
+      if (childSnippet.trim().length > 15) {
+        chunks.push({
+          id: `${docId}_chunk_${chunkIndex++}`,
+          projectId,
+          docId,
+          docTitle,
+          chunkIndex,
+          content: childSnippet.trim(),
+          parentContent: parentText
+        });
+      }
+
+      currentParent = '';
+    };
+
+    for (const para of paragraphs) {
+      if ((currentParent.length + para.length) > 900 && currentParent.length > 200) {
+        flushParent();
+      }
+      currentParent += (currentParent ? '\n\n' : '') + para.trim();
+    }
+    flushParent();
+
+    // 空の場合はフォールバック
+    if (chunks.length === 0 && text.trim().length > 0) {
+      chunks.push({
+        id: `${docId}_chunk_0`,
+        projectId,
+        docId,
+        docTitle,
+        chunkIndex: 0,
+        content: text.slice(0, 300),
+        parentContent: text
+      });
     }
 
     return chunks;

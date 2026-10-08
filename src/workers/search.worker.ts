@@ -57,6 +57,42 @@ async function initOrama() {
   });
 }
 
+// 数値・単位パターン (15m, 2.5m, 100万円, 50%, 第3条, 2026年, 30秒, 500kW 等)
+const METRIC_PATTERN = /([^\s、。]{1,15}[:：\s]*)?(\b\d+(?:\.\d+)?\s*(?:m|mm|cm|km|kg|g|t|%|％|円|万|億|台|個|件|人|分|秒|時間|日|年|月|条|項|号|℃|W|kW|V|A|Hz|k|K|M|G|GB|MB|KB)\b|[第\d]+条(?:第\d+項)?)/gi;
+
+// 重要要件・仕様・制約キーワード
+const REQUIREMENT_PATTERN = /必須|要件|規定|禁止|上限|下限|以上|以下|未満|決定|仕様|担当|期日|納期|合意|条件|基準|目標|原則|留意|注意|推奨/;
+
+// チャンク本文から重要数値・単位とキー要件センテンスを抽出
+function extractMetricsAndFacts(text: string): { metrics: string[]; keyFacts: string[] } {
+  const metrics: string[] = [];
+  const keyFacts: string[] = [];
+
+  const matchedMetrics = text.match(METRIC_PATTERN);
+  if (matchedMetrics) {
+    for (const m of matchedMetrics) {
+      const clean = m.trim();
+      if (clean.length >= 2 && !metrics.includes(clean) && metrics.length < 8) {
+        metrics.push(clean);
+      }
+    }
+  }
+
+  const sentences = text.split(/[\n。]+/);
+  for (const s of sentences) {
+    const trimmed = s.trim();
+    if (trimmed.length >= 8 && trimmed.length <= 160) {
+      if (REQUIREMENT_PATTERN.test(trimmed)) {
+        if (!keyFacts.includes(trimmed) && keyFacts.length < 5) {
+          keyFacts.push(trimmed);
+        }
+      }
+    }
+  }
+
+  return { metrics, keyFacts };
+}
+
 self.onmessage = async (e: MessageEvent) => {
   const { type, payload, id } = e.data;
 
@@ -184,8 +220,11 @@ self.onmessage = async (e: MessageEvent) => {
         }
       }
 
-      // 2. ベクトル類似度によるスコアリング
-      const scoredResults: { chunk: DocumentChunk; score: number }[] = [];
+      // 2. ベクトル類似度 + 数値・単位・要件一致による高度スコアリング
+      const scoredResults: { chunk: DocumentChunk; score: number; metrics: string[]; keyFacts: string[] }[] = [];
+
+      // クエリ内の数値や単位、要件キーワードの検出
+      const isAskingForMetrics = /m|mm|cm|km|kg|g|t|%|％|円|万|億|台|個|件|人|分|秒|時間|日|年|月|条|項|号|℃|W|kW|いくら|いつ|何m|何%|どれくらい|値|数値|数量|期間|金額|価格|予算|仕様|要件|条件|規定|基準/.test(query);
 
       for (const chunkId of candidateIds) {
         const chunk = chunksStore.get(chunkId);
@@ -198,12 +237,25 @@ self.onmessage = async (e: MessageEvent) => {
           score = 0.5;
         }
 
-        // 直接キーワード完全一致がある場合はスコアをブースト
-        if (query.length >= 3 && chunk.content.includes(query)) {
-          score = Math.min(1.0, score + 0.3);
+        // 重要数値・単位およびキーファクトの抽出
+        const { metrics, keyFacts } = extractMetricsAndFacts(chunk.parentContent || chunk.content);
+
+        // クエリが数値を求めており、チャンクに数値・単位が含まれる場合は大幅スコアブースト
+        if (isAskingForMetrics && metrics.length > 0) {
+          score += 0.35;
         }
 
-        scoredResults.push({ chunk, score });
+        // 規定・要件キーワードが含まれている場合はスコアブースト
+        if (keyFacts.length > 0) {
+          score += 0.2;
+        }
+
+        // クエリキーワードの直接完全一致ブースト
+        if (query.length >= 3 && chunk.content.includes(query)) {
+          score += 0.4;
+        }
+
+        scoredResults.push({ chunk, score, metrics, keyFacts });
       }
 
       scoredResults.sort((a, b) => b.score - a.score);
@@ -222,7 +274,9 @@ self.onmessage = async (e: MessageEvent) => {
           docTitle: item.chunk.docTitle,
           snippet: item.chunk.content,
           fullContext: item.chunk.parentContent,
-          score: item.score
+          score: Math.min(1.0, item.score),
+          metrics: item.metrics,
+          keyFacts: item.keyFacts
         });
 
         if (finalResults.length >= topK) break;

@@ -66,6 +66,8 @@ export interface SourceReference {
   snippet: string;
   fullContext: string;
   score: number;
+  metrics?: string[];
+  keyFacts?: string[];
 }
 
 export interface ChatMessage {

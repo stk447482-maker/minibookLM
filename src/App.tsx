@@ -307,7 +307,7 @@ export const App: React.FC = () => {
         }
       }
 
-      // 🎯 厳密RAG直接抽出モードの場合
+      // 🎯 厳密RAG直接抽出モードの場合 (構造化ファクトシート生成)
       if (isDirectRAG) {
         if (enabledDocIds.length === 0) {
           throw new Error('厳密RAG直接抽出を行うには、左側のドキュメント一覧で対象の資料にチェックを入れてください。');
@@ -316,13 +316,53 @@ export const App: React.FC = () => {
           throw new Error('選択されたドキュメント内に関連する該当箇所が見つかりませんでした。');
         }
 
-        let directContent = `### 🎯 厳密RAG 抽出結果 (選択資料: ${activeDocTitles.join(', ')})\n\n`;
-        directContent += `選択された **${enabledDocIds.length}** 件のドキュメント (計 ${totalContextChars.toLocaleString()} 文字) から該当コンテキストを抽出しました。\n\n`;
+        // 全抽出結果から数値・単位・要件を網羅集約
+        const allMetrics: { doc: string; value: string }[] = [];
+        const allFacts: { doc: string; fact: string }[] = [];
 
+        searchResults.forEach(r => {
+          if (r.metrics) {
+            r.metrics.forEach((m: string) => {
+              if (!allMetrics.some((item: { doc: string; value: string }) => item.value === m)) {
+                allMetrics.push({ doc: r.docTitle, value: m });
+              }
+            });
+          }
+          if (r.keyFacts) {
+            r.keyFacts.forEach((f: string) => {
+              if (!allFacts.some((item: { doc: string; fact: string }) => item.fact === f)) {
+                allFacts.push({ doc: r.docTitle, fact: f });
+              }
+            });
+          }
+        });
+
+        let directContent = `### 🎯 厳密RAG 構造化ファクトシート (選択資料: ${activeDocTitles.join(', ')})\n\n`;
+        directContent += `> 選択された **${enabledDocIds.length}** 件のドキュメント (計 ${totalContextChars.toLocaleString()} 文字) から重要数値・仕様・要件条文を直接抽出しました。\n\n`;
+
+        if (allMetrics.length > 0) {
+          directContent += `#### 📊 【抽出された重要数値・仕様・単位】\n`;
+          directContent += `| 出典ドキュメント | 抽出された数値・仕様・規定値 |\n`;
+          directContent += `| :--- | :--- |\n`;
+          allMetrics.slice(0, 15).forEach(m => {
+            directContent += `| **${m.doc}** | \`${m.value}\` |\n`;
+          });
+          directContent += `\n`;
+        }
+
+        if (allFacts.length > 0) {
+          directContent += `#### 📌 【該当する重要規定・決定事項・根拠センテンス】\n`;
+          allFacts.slice(0, 8).forEach(f => {
+            directContent += `- 💡 **[${f.doc}]**: ${f.fact}\n`;
+          });
+          directContent += `\n`;
+        }
+
+        directContent += `#### 📄 【抽出コンテキスト詳細】\n`;
         searchResults.forEach((r, idx) => {
-          directContent += `#### 📄 [${idx + 1}] ${r.docTitle}\n`;
+          directContent += `##### [${idx + 1}] ${r.docTitle} (適合度: ${(r.score * 100).toFixed(0)}%)\n`;
           directContent += `> ${r.snippet}\n\n`;
-          directContent += `<details><summary>ドキュメント本文コンテキストを展開</summary>\n\n${r.fullContext}\n\n</details>\n\n---\n\n`;
+          directContent += `<details><summary>ドキュメント前後文脈を展開</summary>\n\n${r.fullContext}\n\n</details>\n\n---\n\n`;
         });
 
         if (graphSummary) {
@@ -344,16 +384,17 @@ export const App: React.FC = () => {
         return;
       }
 
-      // 🤖 通常AI回答モード (長文ドキュメント完全把握・NotebookLM型グラウンディング)
+      // 🤖 通常AI回答モード (深層ファクトグラウンディング & 的確な論理回答)
       let systemPrompt = '';
       if (fullDocsContext) {
-        systemPrompt = `あなたはGoogle NotebookLMのように、ユーザーから提供された【参照ドキュメント】の内容を完璧に読解・分析して回答する専任AIアシスタントです。
+        systemPrompt = `あなたは最高峰の分析力と洞察力を持つ専任リサーチアシスタントです。
+ユーザーの質問に対して、以下の【参照ドキュメント】に記載された具体的な数値（〇〇m、〇〇円、〇〇%など）、固有名詞、条項、条件を漏れなく引用し、的確かつ深い論理構成で回答してください。浅い要約や一般論だけで終わらせることは厳禁です。
 
-【最重要原則】
-1. あなたの知識の源泉は、以下の【参照ドキュメント】に記載された全情報です。
-2. ユーザーの質問に対して、ドキュメントに書かれている事実、決定事項、数値、用語、文脈を徹底的に読み解き、網羅的かつ具体的に回答してください。
-3. 回答時には「ドキュメント【${activeDocTitles[0]}】によると...」のように資料名を根拠として明示してください。
-4. ドキュメント内に一切記述のない事柄を問われた場合のみ、「提供されたドキュメントには記載がありません」と明確に区別して回答してください。
+【回答の絶対遵守ルール】
+1. **【結論・核心の数値】を冒頭で明示**: 質問で問われている具体的数値（例: 〇〇m、〇〇kg、〇〇円、条文番号等）や核心の結論を最初にズバリ答えてください。
+2. **【ドキュメント根拠の詳細解説】**: 資料名【ドキュメント名】を明記し、なぜその結論・仕様になるのか、背景や文脈を含めて詳しく説明してください。
+3. **【条件・制約・留意事項の網羅】**: 上限/下限、前提条件、例外規定、担当者、期日などがドキュメントにあれば、それらも漏れなく箇条書き等で補足してください。
+4. ドキュメントに一切記載のない事柄は「提供資料内に該当する記述はありません」と明記してください。
 
 【参照ドキュメント (選択中: ${activeDocTitles.join(', ')} / 計 ${totalContextChars.toLocaleString()} 文字)】
 ${fullDocsContext}
@@ -379,7 +420,7 @@ ${graphSummary ? `【ナレッジネットワーク関係性】\n${graphSummary}
       setStatusMessage(`ドキュメント (${activeDocTitles.length}件) を解析して回答生成中...`);
 
       const userPromptWithContext = fullDocsContext
-        ? `【質問】${query}\n\n(※上記の提供ドキュメント【${activeDocTitles.join(', ')}】の内容を把握した上で、質問に対する回答を日本語で答えてください)`
+        ? `【質問】${query}\n\n(※提供ドキュメント【${activeDocTitles.join(', ')}】に書かれている具体的な数値（〇〇m等）、要件、根拠条項を漏れなく引用し、的を射た深い分析と結論を日本語で回答してください)`
         : query;
 
       const recentMessages = config.mode === 'embedded-mobile' ? messages.slice(-4) : messages.slice(-10);
