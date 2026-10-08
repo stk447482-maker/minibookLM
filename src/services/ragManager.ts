@@ -324,11 +324,118 @@ class RAGManager {
       if (!seenParents.has(chunk.parentContent)) {
         seenParents.add(chunk.parentContent);
         collectedText += `\n\n【出典: ${chunk.docTitle}】\n${chunk.parentContent}`;
-        if (collectedText.length >= 24000) break;
+        if (collectedText.length >= 4000) break;
       }
     }
 
     return collectedText.trim() || '（選択されたドキュメント本文がありません）';
+  }
+
+  // Studio機能向け：高密度ファクトシート＆最適化コンテキスト構築
+  public async getStudioOptimizedContext(
+    projectId: string,
+    enabledDocIds: string[],
+    customPrompt?: string,
+    maxChars: number = 3200
+  ): Promise<{ contextText: string; keyFacts: string[]; docTitles: string[] }> {
+    const allChunks = await dbService.getChunksByProject(projectId);
+    const enabledSet = new Set(enabledDocIds);
+    const activeChunks = allChunks.filter(c => enabledSet.has(c.docId));
+
+    if (activeChunks.length === 0) {
+      return { contextText: '（選択されたドキュメント本文がありません）', keyFacts: [], docTitles: [] };
+    }
+
+    const docGroups = new Map<string, { title: string; parentBlocks: Map<string, string>; chunks: DocumentChunk[] }>();
+    for (const chunk of activeChunks) {
+      if (!docGroups.has(chunk.docId)) {
+        docGroups.set(chunk.docId, {
+          title: chunk.docTitle,
+          parentBlocks: new Map(),
+          chunks: []
+        });
+      }
+      const group = docGroups.get(chunk.docId)!;
+      group.chunks.push(chunk);
+      if (!group.parentBlocks.has(chunk.parentContent)) {
+        group.parentBlocks.set(chunk.parentContent, chunk.parentContent);
+      }
+    }
+
+    const docTitles = Array.from(docGroups.values()).map(g => g.title);
+
+    // 1. 全ドキュメントから確定数値・主要仕様・条項を自動抽出
+    const keyFacts: string[] = [];
+    const factRegex = /([^\n。]*?\d+(?:\.\d+)?\s*(?:m|mm|cm|km|kg|g|t|円|万円|億円|%|パーセント|割|条|項|号|度|℃|人|名|個|件|台|年|月|日|分|秒|時間|倍)[^\n。]*?[。]?)/gi;
+
+    for (const group of docGroups.values()) {
+      for (const parent of group.parentBlocks.values()) {
+        const matches = parent.match(factRegex);
+        if (matches) {
+          for (const m of matches) {
+            const clean = m.trim().replace(/^[-*・#\s]+/, '');
+            if (clean.length >= 8 && clean.length <= 120 && !keyFacts.includes(clean)) {
+              keyFacts.push(`[${group.title}] ${clean}`);
+            }
+          }
+        }
+      }
+    }
+
+    // 2. カスタム指示がある場合は関連検索を実行して優先的に配置
+    let prioritizedText = '';
+    if (customPrompt && customPrompt.trim()) {
+      try {
+        const searchHits = await this.search(customPrompt, enabledDocIds, 3);
+        if (searchHits.length > 0) {
+          prioritizedText += `### 🎯 【カスタム指示「${customPrompt}」に直結する抽出箇所】\n`;
+          searchHits.forEach(h => {
+            prioritizedText += `【資料: ${h.docTitle}】\n${h.snippet}\n`;
+          });
+          prioritizedText += '\n---\n';
+        }
+      } catch {}
+    }
+
+    // 3. 各ドキュメントの本文を公平に配分して構築
+    let bodyText = '';
+    const remainingBudget = maxChars - prioritizedText.length - (keyFacts.length > 0 ? 600 : 0);
+    const budgetPerDoc = Math.max(400, Math.floor(remainingBudget / Math.max(1, docGroups.size)));
+
+    let docIdx = 1;
+    for (const [, group] of docGroups.entries()) {
+      const header = `\n📄 【資料 ${docIdx}/${docGroups.size}: ${group.title}】\n`;
+      let docText = '';
+
+      for (const parent of group.parentBlocks.values()) {
+        if ((docText.length + parent.length) > budgetPerDoc) {
+          const sliceLen = budgetPerDoc - docText.length;
+          if (sliceLen > 60) {
+            docText += `${parent.slice(0, sliceLen)}...\n`;
+          }
+          break;
+        }
+        docText += `${parent}\n\n`;
+      }
+      bodyText += header + docText;
+      docIdx++;
+    }
+
+    let fullContext = '';
+    if (keyFacts.length > 0) {
+      fullContext += `### 📊 【ドキュメント内の主要確定数値・仕様ファクト（必須参照）】\n` +
+        keyFacts.slice(0, 10).map(f => `- ${f}`).join('\n') + '\n\n---\n';
+    }
+    if (prioritizedText) {
+      fullContext += prioritizedText + '\n';
+    }
+    fullContext += `### 📑 【対象ドキュメント詳細本文】\n` + bodyText;
+
+    return {
+      contextText: fullContext.trim(),
+      keyFacts: keyFacts.slice(0, 10),
+      docTitles
+    };
   }
 
   // 選択されたドキュメントの全コンテキストをモデルのトークン枠に応じて動的最適化
