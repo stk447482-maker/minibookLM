@@ -177,16 +177,16 @@ class LLMService {
       return;
     }
 
-    // 💻 デスクトップ API モードでローカルOllamaが起動している場合は接続を試行
-    if (config.mode === 'desktop-api' && config.desktopApiEndpoint) {
+    // 💻 デスクトップ API モード (ローカル Ollama / llama-server / server.py)
+    if (config.mode === 'desktop-api') {
+      const endpoint = config.desktopApiEndpoint || 'http://127.0.0.1:11434';
+      const model = config.desktopModelName || 'llama3.1';
       try {
-        const endpoint = config.desktopApiEndpoint || 'http://127.0.0.1:11434';
-        const model = config.desktopModelName || 'llama3.1';
         yield* this.streamDesktopApi(endpoint, model, messages, config.temperature, abortSignal);
         return;
-      } catch {
-        // Ollama未起動の場合は自動でブラウザ内WebGPU (WebLLM) へフォールバック
-        onInitProgress?.('ローカルAPI未検出のため、ブラウザ内WebGPU推論へ自動切替中...');
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        throw new Error(`ローカルAPI (${endpoint}) への接続に失敗しました: ${msg}。\nOllama または server.py が起動しているかご確認ください。\n完全ブラウザ内推論をご利用の場合は「⚙️設定」から「⚡ ブラウザ内 WebGPU」を選択してください。`);
       }
     }
 

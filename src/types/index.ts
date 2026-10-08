@@ -121,3 +121,13 @@ export interface StudioArtifact {
   customPrompt?: string; // ユーザーが指定した自由な指示
   createdAt: number;
 }
+
+export interface FactSkeleton {
+  hasMatch: boolean;
+  facts: { target: string; value: string; sentence: string; docTitle: string }[];
+  evidenceSentences: { docTitle: string; sentence: string }[];
+  constraints: string[];
+  formattedContextForLLM: string;
+  rawEvidenceCard: string;
+}
+

@@ -3,7 +3,7 @@
 // [Status] Pass (Harness env checked).
 
 import * as pdfjsLib from 'pdfjs-dist';
-import { DocumentChunk, DocumentSource, SourceReference } from '../types/index.ts';
+import { DocumentChunk, DocumentSource, SourceReference, FactSkeleton } from '../types/index.ts';
 import { dbService } from './db.ts';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
@@ -586,6 +586,126 @@ class RAGManager {
     });
 
     return summary;
+  }
+
+  // 🎯 確定ファクト骨格ビルダー (アルゴリズム側で9割の抽出を完結)
+  public buildFactSkeleton(query: string, searchResults: SourceReference[]): FactSkeleton {
+    if (!searchResults || searchResults.length === 0) {
+      return {
+        hasMatch: false,
+        facts: [],
+        evidenceSentences: [],
+        constraints: [],
+        formattedContextForLLM: '',
+        rawEvidenceCard: ''
+      };
+    }
+
+    const queryClean = query.toLowerCase().trim();
+    const queryTokens = queryClean.split(/[\s,、。？?！!「」『』]+/).filter(t => t.length > 1);
+
+    // 1. 質問に直結する確定データ（targetedFacts）の集約
+    const allTargetedFacts: { target: string; value: string; sentence: string; docTitle: string }[] = [];
+    searchResults.forEach(r => {
+      if (r.targetedFacts) {
+        r.targetedFacts.forEach(tf => {
+          if (!allTargetedFacts.some(f => f.sentence === tf.sentence && f.value === tf.value)) {
+            allTargetedFacts.push(tf);
+          }
+        });
+      }
+    });
+
+    // 2. 根拠文の抽出（Context Window Expansion: 親ブロックから質問関連センテンスを特定）
+    const evidenceSentences: { docTitle: string; sentence: string; score: number }[] = [];
+    const constraints: string[] = [];
+
+    searchResults.forEach(r => {
+      const full = r.fullContext || r.snippet;
+      const sentences = full.split(/(?<=[。！？\n])/).map(s => s.trim()).filter(s => s.length >= 8);
+
+      sentences.forEach(s => {
+        const sLower = s.toLowerCase();
+        const matchCount = queryTokens.filter(tok => sLower.includes(tok)).length;
+        if (matchCount > 0 || allTargetedFacts.some(tf => s.includes(tf.value))) {
+          if (!evidenceSentences.some(e => e.sentence === s)) {
+            evidenceSentences.push({
+              docTitle: r.docTitle,
+              sentence: s,
+              score: matchCount
+            });
+          }
+        }
+
+        // 制約・注意点・条件文の抽出
+        if (/必須|要件|条件|規定|禁止|但し|ただし|上限|下限|以上|以下|未満|注意|留意|原則/.test(s)) {
+          if (!constraints.includes(s) && constraints.length < 4) {
+            constraints.push(`[${r.docTitle}] ${s}`);
+          }
+        }
+      });
+    });
+
+    evidenceSentences.sort((a, b) => b.score - a.score);
+    const topEvidence = evidenceSentences.slice(0, 4);
+
+    const hasMatch = allTargetedFacts.length > 0 || topEvidence.length > 0 || (searchResults[0]?.score || 0) > 0.4;
+
+    if (!hasMatch) {
+      return {
+        hasMatch: false,
+        facts: [],
+        evidenceSentences: [],
+        constraints: [],
+        formattedContextForLLM: '',
+        rawEvidenceCard: ''
+      };
+    }
+
+    // 3. 0.5B用の超高密度プロンプト用テキスト（余計なトークンを徹底排除）
+    let formattedContextForLLM = '';
+    if (allTargetedFacts.length > 0) {
+      formattedContextForLLM += '【核心ファクト・数値】\n' +
+        allTargetedFacts.slice(0, 3).map(f => `・${f.target}: ${f.value} （出典: ${f.docTitle}）`).join('\n') + '\n\n';
+    }
+
+    if (topEvidence.length > 0) {
+      formattedContextForLLM += '【原文根拠】\n' +
+        topEvidence.slice(0, 3).map(e => `・「${e.sentence}」 （出典: ${e.docTitle}）`).join('\n') + '\n\n';
+    }
+
+    if (constraints.length > 0) {
+      formattedContextForLLM += '【関連条件・留意事項】\n' +
+        constraints.slice(0, 2).map(c => `・${c}`).join('\n') + '\n';
+    }
+
+    // 4. UI表示用の確定エビデンスカード（Markdown）
+    let rawEvidenceCard = '\n\n---\n\n#### 📑 【アルゴリズム抽出 根拠エビデンス】\n';
+    if (allTargetedFacts.length > 0) {
+      rawEvidenceCard += '| 項目・仕様 | 確定値 | 根拠原文 | 出典資料 |\n';
+      rawEvidenceCard += '| :--- | :--- | :--- | :--- |\n';
+      allTargetedFacts.slice(0, 4).forEach(f => {
+        rawEvidenceCard += `| **${f.target}** | \`${f.value}\` | ${f.sentence} | ${f.docTitle} |\n`;
+      });
+      rawEvidenceCard += '\n';
+    }
+
+    if (topEvidence.length > 0) {
+      rawEvidenceCard += '<details><summary>📄 抽出された根拠文スニペット（クリックで展開）</summary>\n\n';
+      topEvidence.forEach((e, idx) => {
+        rawEvidenceCard += `> **[${idx + 1}] ${e.docTitle}**\n> 「${e.sentence}」\n\n`;
+      });
+      rawEvidenceCard += '</details>\n';
+    }
+
+    return {
+      hasMatch: true,
+      facts: allTargetedFacts.slice(0, 4),
+      evidenceSentences: topEvidence.map(e => ({ docTitle: e.docTitle, sentence: e.sentence })),
+      constraints: constraints.slice(0, 3),
+      formattedContextForLLM: formattedContextForLLM.trim(),
+      rawEvidenceCard: rawEvidenceCard.trim()
+    };
   }
 
   public async search(

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Smartphone, Laptop, Settings, Sparkles, Sun, Moon } from 'lucide-react';
+import { Laptop, Settings, Sparkles, Sun, Moon, Zap } from 'lucide-react';
 import { ModelConfig } from '../types/index.ts';
 
 interface HeaderProps {
@@ -77,15 +77,20 @@ export const Header: React.FC<HeaderProps> = ({
           onClick={onOpenSettings}
           className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700/70 text-xs font-medium text-slate-200 transition-colors shadow-sm"
         >
-          {config.mode === 'embedded-mobile' ? (
+          {config.mode === 'cloud-gemini' || config.cloudApiKey ? (
             <>
-              <Smartphone className="w-3.5 h-3.5 text-emerald-400" />
-              <span>📱 携帯埋込</span>
+              <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+              <span>☁️ Gemini API</span>
+            </>
+          ) : config.mode === 'desktop-api' ? (
+            <>
+              <Laptop className="w-3.5 h-3.5 text-cyan-400" />
+              <span>💻 ローカルAPI</span>
             </>
           ) : (
             <>
-              <Laptop className="w-3.5 h-3.5 text-cyan-400" />
-              <span>💻 PC切替</span>
+              <Zap className="w-3.5 h-3.5 text-emerald-400 fill-emerald-400" />
+              <span>⚡ WebGPU (0.5B+RAG)</span>
             </>
           )}
           <Settings className="w-3.5 h-3.5 text-slate-400 ml-1" />

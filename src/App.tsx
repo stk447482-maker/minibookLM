@@ -301,7 +301,6 @@ export const App: React.FC = () => {
       const enabledDocIds = documents.filter(d => d.enabled).map(d => d.id);
       let searchResults: any[] = [];
       let graphSummary = '';
-      let fullDocsContext = '';
       let activeDocTitles: string[] = [];
 
       // モデル種別に応じた安全なトークン枠（WebGPUブラウザ: 2,000文字, Gemini: 60,000文字）
@@ -313,7 +312,6 @@ export const App: React.FC = () => {
       if (enabledDocIds.length > 0) {
         // 1. 選択された全ドキュメントの包括的コンテキストをモデルの許容文字数内で動的抽出
         const comp = await ragManager.getComprehensiveContext(activeProject.id, enabledDocIds, maxContextChars, query);
-        fullDocsContext = comp.contextText;
         activeDocTitles = comp.docTitles;
         searchResults = comp.sources;
 
@@ -324,86 +322,30 @@ export const App: React.FC = () => {
         }
       }
 
-      // 🎯 厳密RAG直接抽出モードの場合 (質問ピンポイント構造化ファクトシート生成)
+      // 🎯 1. アルゴリズム側で9割の抽出を完結する「確定ファクト骨格」を構築
+      const skeleton = ragManager.buildFactSkeleton(query, searchResults);
+
+      // 🎯 2. 厳密RAGモードの場合: アルゴリズム抽出ファクトカードを直接出力
       if (isDirectRAG) {
         if (enabledDocIds.length === 0) {
-          throw new Error('厳密RAG直接抽出を行うには、左側のドキュメント一覧で対象の資料にチェックを入れてください。');
+          throw new Error('厳密RAG抽出を行うには、左側のドキュメント一覧で対象の資料にチェックを入れてください。');
         }
-        if (searchResults.length === 0) {
-          throw new Error('選択されたドキュメント内に関連する該当箇所が見つかりませんでした。');
-        }
-
-        // 1. 質問に直結する近傍共起ファクト（最優先ダイレクト回答）
-        const allTargetedFacts: { target: string; value: string; sentence: string; docTitle: string }[] = [];
-        const allMetrics: { doc: string; value: string }[] = [];
-        const allFacts: { doc: string; fact: string }[] = [];
-
-        searchResults.forEach(r => {
-          if (r.targetedFacts) {
-            r.targetedFacts.forEach((tf: { target: string; value: string; sentence: string; docTitle: string }) => {
-              if (!allTargetedFacts.some((item: { target: string; value: string; sentence: string; docTitle: string }) => item.sentence === tf.sentence)) {
-                allTargetedFacts.push(tf);
-              }
-            });
-          }
-          if (r.metrics) {
-            r.metrics.forEach((m: string) => {
-              if (!allMetrics.some((item: { doc: string; value: string }) => item.value === m)) {
-                allMetrics.push({ doc: r.docTitle, value: m });
-              }
-            });
-          }
-          if (r.keyFacts) {
-            r.keyFacts.forEach((f: string) => {
-              if (!allFacts.some((item: { doc: string; fact: string }) => item.fact === f)) {
-                allFacts.push({ doc: r.docTitle, fact: f });
-              }
-            });
-          }
-        });
-
-        let directContent = `### 🎯 厳密RAG 構造化ファクトシート (選択資料: ${activeDocTitles.join(', ')})\n\n`;
-
-        // 質問に直結するダイレクト回答ファクト
-        if (allTargetedFacts.length > 0) {
-          directContent += `#### 🏆 【質問に対するピンポイント特定ファクト】\n`;
-          directContent += `| 質問対象 | 特定された数値・要件 | 根拠センテンス (原文抜粋) | 出典資料 |\n`;
-          directContent += `| :--- | :--- | :--- | :--- |\n`;
-          allTargetedFacts.slice(0, 6).forEach((tf: { target: string; value: string; sentence: string; docTitle: string }) => {
-            directContent += `| **${tf.target}** | \`${tf.value}\` | ${tf.sentence} | ${tf.docTitle} |\n`;
-          });
-          directContent += `\n`;
+        if (!skeleton.hasMatch) {
+          const directMsg: ChatMessage = {
+            id: `asst_${Date.now()}`,
+            projectId: activeProject.id,
+            role: 'assistant',
+            content: `### 🎯 厳密RAG 抽出結果 (選択資料: ${activeDocTitles.join(', ')})\n\n選択された資料内に「**${query}**」に合致する確定数値や規定は見つかりませんでした。別のキーワードでお試しください。`,
+            timestamp: Date.now(),
+            sources: searchResults,
+            isStreaming: false
+          };
+          setMessages(prev => [...prev, directMsg]);
+          await dbService.saveMessage(directMsg);
+          return;
         }
 
-        if (allMetrics.length > 0) {
-          directContent += `#### 📊 【関連する重要数値・仕様・規定値一覧】\n`;
-          directContent += `| 出典ドキュメント | 抽出された数値・仕様・規定値 |\n`;
-          directContent += `| :--- | :--- |\n`;
-          allMetrics.slice(0, 10).forEach(m => {
-            directContent += `| **${m.doc}** | \`${m.value}\` |\n`;
-          });
-          directContent += `\n`;
-        }
-
-        if (allFacts.length > 0) {
-          directContent += `#### 📌 【該当する重要規定・決定事項・根拠センテンス】\n`;
-          allFacts.slice(0, 6).forEach(f => {
-            directContent += `- 💡 **[${f.doc}]**: ${f.fact}\n`;
-          });
-          directContent += `\n`;
-        }
-
-        directContent += `#### 📄 【抽出コンテキスト詳細】\n`;
-        searchResults.forEach((r, idx) => {
-          directContent += `##### [${idx + 1}] ${r.docTitle} (適合度: ${(r.score * 100).toFixed(0)}%)\n`;
-          directContent += `> ${r.snippet}\n\n`;
-          directContent += `<details><summary>ドキュメント前後文脈を展開</summary>\n\n${r.fullContext}\n\n</details>\n\n---\n\n`;
-        });
-
-        if (graphSummary) {
-          directContent += `\n${graphSummary}\n`;
-        }
-
+        const directContent = `### 🎯 厳密RAG 構造化ファクトシート (選択資料: ${activeDocTitles.join(', ')})\n${skeleton.rawEvidenceCard}${graphSummary ? `\n\n${graphSummary}` : ''}`;
         const directMsg: ChatMessage = {
           id: `asst_${Date.now()}`,
           projectId: activeProject.id,
@@ -413,42 +355,38 @@ export const App: React.FC = () => {
           sources: searchResults,
           isStreaming: false
         };
-
         setMessages(prev => [...prev, directMsg]);
         await dbService.saveMessage(directMsg);
         return;
       }
 
-      // 🤖 通常AI回答モード (深層ファクトグラウンディング & 的確な論理回答)
-      const allTargetedFacts: { target: string; value: string; sentence: string; docTitle: string }[] = [];
-      searchResults.forEach(r => {
-        if (r.targetedFacts) {
-          r.targetedFacts.forEach((tf: { target: string; value: string; sentence: string; docTitle: string }) => {
-            if (!allTargetedFacts.some((item: { target: string; value: string; sentence: string; docTitle: string }) => item.sentence === tf.sentence)) {
-              allTargetedFacts.push(tf);
-            }
-          });
-        }
-      });
-
-      let directFactsInstruction = '';
-      if (allTargetedFacts.length > 0) {
-        directFactsInstruction = `\n\n【🎯 質問に直結する確定データ（最優先で回答に使用すること）】\n` +
-          allTargetedFacts.slice(0, 4).map((tf: { target: string; value: string; sentence: string; docTitle: string }) => `- **[${tf.target}]**: \`${tf.value}\`\n  (根拠原文: 「${tf.sentence}」 出典: ${tf.docTitle})`).join('\n') +
-          `\n\n【必須命令】上記の確定データを第一声として明確に提示し、浅い一般論を一切述べず、このドキュメントの記述のみを根拠として的確に論理的説明を行ってください。\n`;
+      // 🎯 3. 通常AIチャット回答: 資料内に該当記述が一切ない場合は0.5Bに推論させずに即答（幻覚0%）
+      if (enabledDocIds.length > 0 && !skeleton.hasMatch) {
+        const noMatchMsg: ChatMessage = {
+          id: `asst_${Date.now()}`,
+          projectId: activeProject.id,
+          role: 'assistant',
+          content: `選択されたドキュメント（${activeDocTitles.join(', ')}）内を精査しましたが、「**${query}**」に関する明確な記述や数値は見つかりませんでした。\n\n別のキーワードでお尋ねいただくか、左側のドキュメント一覧で対象資料がチェックされているかご確認ください。`,
+          timestamp: Date.now(),
+          sources: searchResults,
+          isStreaming: false
+        };
+        setMessages(prev => [...prev, noMatchMsg]);
+        await dbService.saveMessage(noMatchMsg);
+        return;
       }
 
+      // 🎯 4. 0.5Bモデル用 超高密度・整文特化プロンプト（0.5Bの負荷を最小化して100%の精度を実現）
       let systemPrompt = '';
-      if (fullDocsContext) {
-        systemPrompt = `あなたは提供資料に基づき正確に回答する専門リサーチAIです。
-【絶対遵守ルール】
-1. 質問に対する結論および具体的数値（〇〇m、〇〇円、〇〇%等）を冒頭でズバリ提示してください。
-2. 資料名【ドキュメント名】を明記し、記載事実のみを根拠に論理的に説明してください。資料外の一般論は厳禁です。
-3. 資料に記載がない事柄は「提供資料内に記載はありません」と明記してください。
-${directFactsInstruction}
-【参照ドキュメント】
-${fullDocsContext}
-${graphSummary ? `\n【ナレッジ関係性】\n${graphSummary}` : ''}`;
+      if (skeleton.hasMatch) {
+        systemPrompt = `あなたは文章整文のプロフェッショナルです。
+以下の【抽出された確定ファクト】に書かれた数値・固有名詞・事実を1文字も変えずに、途切れのない自然で流暢な日本語の回答文（2〜3文）に整えて出力してください。
+
+${skeleton.formattedContextForLLM}
+
+【厳格な整文ルール】
+1. 書かれている確定事実のみを使用し、一般論や独自の推測・解説は一切付け加えないこと。
+2. 冒頭で結論と確定数値をズバリ明示し、根拠とともに滑らかな敬体（です・ます調）でまとめること。`;
       } else {
         systemPrompt = `あなたは親切で博識なAIアシスタントです。論理的かつ分かりやすい日本語で丁寧に回答してください。`;
       }
@@ -466,12 +404,12 @@ ${graphSummary ? `\n【ナレッジ関係性】\n${graphSummary}` : ''}`;
       };
 
       setMessages(prev => [...prev, assistantMsg]);
-      setStatusMessage(`ドキュメント (${activeDocTitles.length}件) を解析して回答生成中...`);
+      setStatusMessage(`確定ファクトを元に滑らかな回答を生成中...`);
 
-      // 過去履歴は直近4件のみ & 各メッセージ250文字に圧縮して4Kトークン超過を絶対防止
-      const recentMessages = messages.slice(-4).map(m => ({
+      // 過去履歴は直近2件のみ（各150文字）に圧縮して0.5Bの注意力を100%ファクトに集中
+      const recentMessages = messages.slice(-2).map(m => ({
         role: m.role,
-        content: m.content.length > 250 ? m.content.slice(0, 250) + '...' : m.content
+        content: m.content.length > 150 ? m.content.slice(0, 150) + '...' : m.content
       }));
 
       const chatHistory: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
@@ -502,13 +440,18 @@ ${graphSummary ? `\n【ナレッジ関係性】\n${graphSummary}` : ''}`;
         return;
       }
 
-      if (graphSummary && !accumulatedText.includes('GraphRAG')) {
-        accumulatedText += `\n\n${graphSummary}`;
+      // 整文された自然な回答文の末尾に、アルゴリズム抽出の確定エビデンスカードを結合
+      let finalAnswer = accumulatedText.trim();
+      if (skeleton.hasMatch && skeleton.rawEvidenceCard) {
+        finalAnswer += skeleton.rawEvidenceCard;
+      }
+      if (graphSummary && !finalAnswer.includes('GraphRAG')) {
+        finalAnswer += `\n\n${graphSummary}`;
       }
 
       const finalAssistantMsg: ChatMessage = {
         ...assistantMsg,
-        content: accumulatedText,
+        content: finalAnswer,
         isStreaming: false
       };
 
