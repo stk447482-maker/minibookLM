@@ -33,7 +33,8 @@ class LLMService {
     apiKey: string,
     modelName: string,
     messages: { role: 'system' | 'user' | 'assistant'; content: string }[],
-    temperature: number = 0.3
+    temperature: number = 0.3,
+    abortSignal?: AbortSignal
   ): AsyncIterable<string> {
     const targetModel = modelName.includes('gemini') ? modelName : 'gemini-1.5-flash';
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:streamGenerateContent?alt=sse&key=${apiKey}`;
@@ -64,7 +65,8 @@ class LLMService {
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      signal: abortSignal
     });
 
     if (!res.ok) {
@@ -105,7 +107,8 @@ class LLMService {
     endpoint: string,
     model: string,
     messages: { role: 'system' | 'user' | 'assistant'; content: string }[],
-    temperature: number = 0.3
+    temperature: number = 0.3,
+    abortSignal?: AbortSignal
   ): AsyncIterable<string> {
     const cleanEndpoint = endpoint.replace(/\/+$/, '');
     const res = await fetch(`${cleanEndpoint}/api/chat`, {
@@ -116,7 +119,8 @@ class LLMService {
         messages,
         stream: true,
         options: { temperature }
-      })
+      }),
+      signal: abortSignal
     });
 
     if (!res.ok) {
@@ -131,6 +135,7 @@ class LLMService {
     let buffer = '';
 
     while (true) {
+      if (abortSignal?.aborted) break;
       const { done, value } = await reader.read();
       if (done) break;
 
@@ -139,6 +144,7 @@ class LLMService {
       buffer = lines.pop() || '';
 
       for (const line of lines) {
+        if (abortSignal?.aborted) break;
         if (!line.trim()) continue;
         try {
           const data = JSON.parse(line);
@@ -159,14 +165,15 @@ class LLMService {
   public async *streamChat(
     messages: { role: 'system' | 'user' | 'assistant'; content: string }[],
     config: ModelConfig,
-    onInitProgress?: (text: string) => void
+    onInitProgress?: (text: string) => void,
+    abortSignal?: AbortSignal
   ): AsyncIterable<string> {
     // ☁️ クラウド Gemini API モード（またはAPIキー設定時）
     if (config.mode === 'cloud-gemini' || config.cloudApiKey) {
       if (!config.cloudApiKey) {
         throw new Error('Google Gemini APIキーが未入力です。「⚙️設定」からAPIキーを入力するか、ブラウザ内推論（WebLLM）をお選びください。');
       }
-      yield* this.streamGeminiDirect(config.cloudApiKey, config.desktopModelName || 'gemini-1.5-flash', messages, config.temperature);
+      yield* this.streamGeminiDirect(config.cloudApiKey, config.desktopModelName || 'gemini-1.5-flash', messages, config.temperature, abortSignal);
       return;
     }
 
@@ -175,7 +182,7 @@ class LLMService {
       try {
         const endpoint = config.desktopApiEndpoint || 'http://127.0.0.1:11434';
         const model = config.desktopModelName || 'llama3.1';
-        yield* this.streamDesktopApi(endpoint, model, messages, config.temperature);
+        yield* this.streamDesktopApi(endpoint, model, messages, config.temperature, abortSignal);
         return;
       } catch {
         // Ollama未起動の場合は自動でブラウザ内WebGPU (WebLLM) へフォールバック
@@ -218,6 +225,7 @@ class LLMService {
 
         let accumulated = '';
         for await (const chunk of chunks) {
+          if (abortSignal?.aborted) break;
           const delta = chunk.choices[0]?.delta?.content || '';
           if (delta) {
             accumulated += delta;

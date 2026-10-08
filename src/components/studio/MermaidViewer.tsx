@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import mermaid from 'mermaid';
 import { Code, AlertTriangle } from 'lucide-react';
+import { DiagramService } from '../../services/diagramService.ts';
 
 interface MermaidViewerProps {
   chart: string;
@@ -20,20 +21,26 @@ export const MermaidViewer: React.FC<MermaidViewerProps> = ({ chart }) => {
   const [showRaw, setShowRaw] = useState(false);
 
   const cleanMermaidCode = (raw: string): string => {
-    // 1. ```mermaid ... ``` コードブロックの抽出
-    const blockMatch = raw.match(/```(?:mermaid)?\s*([\s\S]*?)\s*```/i);
-    let code = blockMatch ? blockMatch[1] : raw;
+    if (!raw) return '';
 
-    // 2. 余計な前後テキストを除去（mermaid開始キーワードを探す）
+    // マインドマップ判定
+    if (raw.includes('mindmap') || raw.includes('branches') || raw.includes('"root"')) {
+      return DiagramService.toMermaidMindmap(raw);
+    }
+
+    // フローチャート判定
+    if (raw.includes('flowchart') || raw.includes('graph') || raw.includes('steps') || raw.includes('"steps"')) {
+      return DiagramService.toMermaidFlowchart(raw);
+    }
+
+    // 汎用Mermaidコードブロック抽出
+    const blockMatch = raw.match(/```(?:mermaid)?\s*([\s\S]*?)```/i);
+    let code = blockMatch ? blockMatch[1] : raw;
     const keywordIndex = code.search(/\b(flowchart|graph|mindmap|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|gitGraph)\b/);
     if (keywordIndex !== -1) {
       code = code.substring(keywordIndex);
     }
-
-    // 3. 末尾の不要なマークダウンや解説を除去
-    code = code.replace(/```/g, '').trim();
-
-    return code;
+    return code.replace(/```/g, '').trim();
   };
 
   useEffect(() => {

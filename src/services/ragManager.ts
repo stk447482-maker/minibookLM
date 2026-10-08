@@ -397,34 +397,48 @@ class RAGManager {
       } catch {}
     }
 
-    // 3. 各ドキュメントの本文を公平に配分して構築
+    // 3. 各ドキュメントの全編（冒頭・中盤・末尾）を均等にカバーするサンプリング構築
     let bodyText = '';
-    const remainingBudget = maxChars - prioritizedText.length - (keyFacts.length > 0 ? 600 : 0);
-    const budgetPerDoc = Math.max(400, Math.floor(remainingBudget / Math.max(1, docGroups.size)));
+    const safeMaxChars = Math.min(maxChars, 2400); // 4Kトークン枠超過を絶対防止
+    const remainingBudget = Math.max(600, safeMaxChars - prioritizedText.length - (keyFacts.length > 0 ? 500 : 0));
+    const budgetPerDoc = Math.max(350, Math.floor(remainingBudget / Math.max(1, docGroups.size)));
 
     let docIdx = 1;
     for (const [, group] of docGroups.entries()) {
       const header = `\n📄 【資料 ${docIdx}/${docGroups.size}: ${group.title}】\n`;
+      const allBlocks = Array.from(group.parentBlocks.values());
       let docText = '';
 
-      for (const parent of group.parentBlocks.values()) {
-        if ((docText.length + parent.length) > budgetPerDoc) {
-          const sliceLen = budgetPerDoc - docText.length;
-          if (sliceLen > 60) {
-            docText += `${parent.slice(0, sliceLen)}...\n`;
+      if (allBlocks.length <= 2) {
+        docText = allBlocks.join('\n\n').slice(0, budgetPerDoc);
+      } else {
+        // 資料全体（冒頭・中盤・終盤）から均等に代表ブロックを抽出
+        const sampleIndices = [
+          0,
+          Math.floor(allBlocks.length * 0.35),
+          Math.floor(allBlocks.length * 0.7),
+          allBlocks.length - 1
+        ];
+        const uniqueIndices = Array.from(new Set(sampleIndices));
+        const blockBudget = Math.max(80, Math.floor(budgetPerDoc / uniqueIndices.length));
+
+        uniqueIndices.forEach((idx, i) => {
+          const blk = allBlocks[idx];
+          if (blk) {
+            if (i > 0) docText += '\n...[中略]...\n';
+            docText += blk.slice(0, blockBudget).trim();
           }
-          break;
-        }
-        docText += `${parent}\n\n`;
+        });
       }
-      bodyText += header + docText;
+
+      bodyText += header + docText.trim() + '\n';
       docIdx++;
     }
 
     let fullContext = '';
     if (keyFacts.length > 0) {
-      fullContext += `### 📊 【ドキュメント内の主要確定数値・仕様ファクト（必須参照）】\n` +
-        keyFacts.slice(0, 10).map(f => `- ${f}`).join('\n') + '\n\n---\n';
+      fullContext += `### 📊 【ドキュメント全編から抽出された確定数値・重要指標】\n` +
+        keyFacts.slice(0, 8).map(f => `- ${f}`).join('\n') + '\n\n---\n';
     }
     if (prioritizedText) {
       fullContext += prioritizedText + '\n';

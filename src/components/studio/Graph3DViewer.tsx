@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import ForceGraph3D from '3d-force-graph';
 import { GraphData } from '../../types/index.ts';
+import { DiagramService } from '../../services/diagramService.ts';
 
 interface Graph3DViewerProps {
   dataString: string;
@@ -16,30 +17,17 @@ export const Graph3DViewer: React.FC<Graph3DViewerProps> = ({ dataString }) => {
 
     let graphData: GraphData = { nodes: [], links: [] };
     try {
-      // JSON形式のトリプルデータをパース
-      let cleanJson = dataString;
-      const match = dataString.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-      if (match) {
-        cleanJson = match[1];
+      graphData = DiagramService.parseKnowledgeGraph(dataString);
+    } catch (err: unknown) {
+      if (containerRef.current) {
+        containerRef.current.innerHTML = `
+          <div class="h-full flex flex-col items-center justify-center p-6 text-center space-y-2 text-rose-300">
+            <span class="text-xs font-bold">⚠️ 3DグラフJSONのパースに失敗しました</span>
+            <p class="text-[11px] text-slate-400 font-mono max-w-xs break-all">${err instanceof Error ? err.message : String(err)}</p>
+            <span class="text-[10px] text-slate-500">上の「⚡ 生成」ボタンを押して再生成してください</span>
+          </div>`;
       }
-      graphData = JSON.parse(cleanJson.trim());
-    } catch {
-      // パース失敗時のフォールバック（シンプルなデモグラフ）
-      graphData = {
-        nodes: [
-          { id: '1', name: '主要テーマ', val: 15, color: '#6366f1' },
-          { id: '2', name: '概念A', val: 10, color: '#8b5cf6' },
-          { id: '3', name: '概念B', val: 10, color: '#ec4899' },
-          { id: '4', name: '詳細要素1', val: 6, color: '#10b981' },
-          { id: '5', name: '詳細要素2', val: 6, color: '#06b6d4' }
-        ],
-        links: [
-          { source: '1', target: '2', label: '関連' },
-          { source: '1', target: '3', label: '包含' },
-          { source: '2', target: '4', label: '詳細' },
-          { source: '3', target: '5', label: '具体例' }
-        ]
-      };
+      return;
     }
 
     // 既存グラフのクリア

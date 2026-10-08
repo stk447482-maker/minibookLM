@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Header } from './components/Header.tsx';
 import { DocumentsPane } from './components/DocumentsPane.tsx';
 import { ChatPane } from './components/ChatPane.tsx';
@@ -10,6 +10,7 @@ import { ragManager } from './services/ragManager.ts';
 import { llmService } from './services/llmService.ts';
 import { dbService } from './services/db.ts';
 import { securityGuard } from './services/securityGuard.ts';
+import { DiagramService } from './services/diagramService.ts';
 
 const EXPECTED_HASH = '3c796256ccc298e53eb6c451fcff012416c8aabb41da6583c6192eecd1cae1fb';
 
@@ -63,6 +64,16 @@ export const App: React.FC = () => {
   const [artifacts, setArtifacts] = useState<StudioArtifact[]>([]);
   const [isGeneratingStudio, setIsGeneratingStudio] = useState(false);
   const [streamingStudioArtifact, setStreamingStudioArtifact] = useState<{ type: StudioTab; title: string; content: string } | null>(null);
+  const studioAbortControllerRef = useRef<AbortController | null>(null);
+
+  const handleCancelStudio = () => {
+    if (studioAbortControllerRef.current) {
+      studioAbortControllerRef.current.abort();
+      studioAbortControllerRef.current = null;
+    }
+    setIsGeneratingStudio(false);
+    setStreamingStudioArtifact(null);
+  };
 
   // 1. 初回マウント時: IndexedDBからプロジェクト復元
   useEffect(() => {
@@ -618,21 +629,35 @@ ${userRequirement}
 【参照資料】
 ${fullContext}`;
       } else if (type === 'mindmap') {
-        title = customPrompt ? `マインドマップ: ${customPrompt.slice(0, 15)}...` : 'Mermaid マインドマップ';
-        prompt = `以下の資料の構造を分析し、階層的なマインドマップを必ずMermaid記法（\`\`\`mermaid\\nmindmap\\n  root((中心テーマ))\\n    ...\\n\`\`\`）のコードブロックのみで出力してください。
-【ルール】
-- 資料内の具体的な専門用語や確定数値（〇〇m、〇〇円など）をノードに含めること。
-- 余計な解説文は一切出力せず、\`\`\`mermaid\`\`\` コードブロックのみを出力すること。
+        title = customPrompt ? `マインドマップ: ${customPrompt.slice(0, 15)}...` : 'マインドマップ';
+        prompt = `以下の資料の構造を分析し、中心テーマと主要な枝・項目をシンプルなJSON形式のみで出力してください（解説不要、\`\`\`json\`\`\`ブロックのみ）:
+\`\`\`json
+{
+  "root": "中心テーマ",
+  "branches": [
+    {
+      "name": "主要項目1",
+      "items": ["具体的数値や仕様1", "具体的数値や仕様2"]
+    }
+  ]
+}
+\`\`\`
 ${userRequirement}
 
 【参照資料】
 ${fullContext}`;
       } else if (type === 'flowchart') {
-        title = customPrompt ? `フローチャート: ${customPrompt.slice(0, 15)}...` : 'Mermaid 業務処理フローチャート';
-        prompt = `以下の資料に記載されたプロセス、手続き、判断分岐、運用手順を抽出し、必ずMermaid記法（\`\`\`mermaid\\nflowchart TD\\n  ...\\n\`\`\`）のコードブロックのみで出力してください。
-【ルール】
-- 条件分岐（ひし形 {条件}）や各工程の具体的なアクションを資料に基づいて明確に記述すること。
-- 余計な解説文は一切出力せず、\`\`\`mermaid\`\`\` コードブロックのみを出力すること。
+        title = customPrompt ? `フローチャート: ${customPrompt.slice(0, 15)}...` : '業務処理フローチャート';
+        prompt = `以下の資料の業務プロセスや処理手順を抽出し、シンプルなJSON形式のみで出力してください（解説不要、\`\`\`json\`\`\`ブロックのみ）:
+\`\`\`json
+{
+  "steps": [
+    {"action": "開始・受付"},
+    {"action": "審査・確認", "condition": true, "yes": "承認", "no": "差戻し"},
+    {"action": "処理完了"}
+  ]
+}
+\`\`\`
 ${userRequirement}
 
 【参照資料】
@@ -667,6 +692,9 @@ ${userRequirement}
 ${fullContext}`;
       }
 
+      const controller = new AbortController();
+      studioAbortControllerRef.current = controller;
+
       setStreamingStudioArtifact({
         type,
         title,
@@ -678,11 +706,14 @@ ${fullContext}`;
           { role: 'system', content: studioSystemPrompt },
           { role: 'user', content: prompt }
         ],
-        config
+        config,
+        undefined,
+        controller.signal
       );
 
       let content = '';
       for await (const chunk of stream) {
+        if (controller.signal.aborted) break;
         content += chunk;
         setStreamingStudioArtifact({
           type,
@@ -691,12 +722,24 @@ ${fullContext}`;
         });
       }
 
+      if (controller.signal.aborted) {
+        return;
+      }
+
+      // 図解系（マインドマップ・フローチャート）は決定論的コンバータで100%安全なMermaidへ自動変換
+      let finalContent = content;
+      if (type === 'mindmap') {
+        finalContent = DiagramService.toMermaidMindmap(content);
+      } else if (type === 'flowchart') {
+        finalContent = DiagramService.toMermaidFlowchart(content);
+      }
+
       const newArtifact: StudioArtifact = {
         id: `art_${Date.now()}`,
         projectId: activeProject.id,
         type,
         title,
-        content,
+        content: finalContent,
         customPrompt,
         createdAt: Date.now()
       };
@@ -705,12 +748,16 @@ ${fullContext}`;
       setArtifacts(prev => [newArtifact, ...prev]);
       await dbService.saveArtifact(newArtifact);
     } catch (err: unknown) {
+      if (studioAbortControllerRef.current?.signal.aborted) {
+        return;
+      }
       const msg = err instanceof Error ? err.message : String(err);
       alert(`Studio生成エラー: ${msg}`);
       setStreamingStudioArtifact(null);
     } finally {
       setIsGeneratingStudio(false);
       setStreamingStudioArtifact(null);
+      studioAbortControllerRef.current = null;
     }
   };
 
@@ -801,6 +848,7 @@ ${fullContext}`;
             streamingArtifact={streamingStudioArtifact}
             enabledDocsCount={documents.filter(d => d.enabled).length}
             onGenerate={handleGenerateStudio}
+            onCancel={handleCancelStudio}
             onDeleteArtifact={handleDeleteArtifact}
             onAddToSource={handleAddContentToSource}
             isGeneratingStudio={isGeneratingStudio}

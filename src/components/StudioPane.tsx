@@ -16,7 +16,8 @@ import {
   Clock,
   PlusCircle,
   Zap,
-  Info
+  Info,
+  RotateCcw
 } from 'lucide-react';
 import { marked } from 'marked';
 import { StudioTab, StudioArtifact } from '../types/index.ts';
@@ -30,6 +31,7 @@ interface StudioPaneProps {
   streamingArtifact?: { type: StudioTab; title: string; content: string } | null;
   enabledDocsCount: number;
   onGenerate: (type: StudioTab, customPrompt?: string) => void;
+  onCancel?: () => void;
   onDeleteArtifact: (id: string) => void;
   onAddToSource: (title: string, content: string) => void;
   isGeneratingStudio: boolean;
@@ -40,6 +42,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
   streamingArtifact,
   enabledDocsCount,
   onGenerate,
+  onCancel,
   onDeleteArtifact,
   onAddToSource,
   isGeneratingStudio
@@ -167,25 +170,37 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
 
       {/* ⚡ 生成アクションエリア */}
       <div className="space-y-2 shrink-0 bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/80">
-        {/* メイン生成ボタン */}
-        <button
-          type="button"
-          onClick={() => handleGenerateClick()}
-          disabled={isGeneratingStudio || enabledDocsCount === 0}
-          className="w-full py-2.5 px-4 bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 disabled:from-slate-800 disabled:to-slate-800 text-white disabled:text-slate-500 rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-2 shadow-md hover:shadow-indigo-500/20 active:scale-[0.99]"
-        >
-          {isGeneratingStudio ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin text-indigo-300" />
-              <span>✨ {currentTabObj.label} を解析・生成中...</span>
-            </>
-          ) : (
-            <>
-              <Zap className="w-3.5 h-3.5 text-amber-300 fill-amber-300" />
-              <span>⚡ 「{currentTabObj.label}」を今すぐ生成</span>
-            </>
+        {/* メイン生成ボタン & 中止ボタン */}
+        <div className="flex items-center space-x-1.5">
+          <button
+            type="button"
+            onClick={() => handleGenerateClick()}
+            disabled={isGeneratingStudio || enabledDocsCount === 0}
+            className="flex-1 py-2.5 px-4 bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 disabled:from-slate-800 disabled:to-slate-800 text-white disabled:text-slate-500 rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-2 shadow-md hover:shadow-indigo-500/20 active:scale-[0.99]"
+          >
+            {isGeneratingStudio ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin text-indigo-300" />
+                <span>✨ {currentTabObj.label} を解析・生成中...</span>
+              </>
+            ) : (
+              <>
+                <Zap className="w-3.5 h-3.5 text-amber-300 fill-amber-300" />
+                <span>⚡ 「{currentTabObj.label}」を今すぐ生成</span>
+              </>
+            )}
+          </button>
+          {isGeneratingStudio && onCancel && (
+            <button
+              type="button"
+              onClick={onCancel}
+              className="px-3 py-2.5 bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 rounded-xl text-xs font-bold transition-all flex items-center space-x-1 shrink-0"
+              title="生成を途中で中止します"
+            >
+              <span>⛔ 中止</span>
+            </button>
           )}
-        </button>
+        </div>
 
         {/* 💡 自由な追加指示入力欄 */}
         <form onSubmit={handleGenerateClick} className="relative">
@@ -265,6 +280,15 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
               </div>
 
               <div className="flex items-center space-x-1 shrink-0">
+                <button
+                  onClick={() => onGenerate(activeTab, currentArtifact.customPrompt)}
+                  disabled={isGeneratingStudio}
+                  className="p-1 hover:bg-slate-800 text-slate-400 hover:text-amber-300 rounded transition-colors text-[10px] flex items-center space-x-0.5 border border-slate-700/60"
+                  title="この成果物を再生成します"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">再生成</span>
+                </button>
                 <button
                   onClick={() => onAddToSource(`[Studio] ${currentArtifact.title}`, currentArtifact.content)}
                   className="p-1 hover:bg-slate-800 text-indigo-400 hover:text-indigo-300 rounded transition-colors text-[10px] flex items-center space-x-0.5 border border-indigo-500/20"
