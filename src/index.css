@@ -184,6 +184,33 @@
   color: #334155 !important;
 }
 
+/* 全モード共通：テーブル・コードブロック・横幅はみ出し防止レイアウトガード */
+.prose table {
+  display: block !important;
+  max-width: 100% !important;
+  width: 100% !important;
+  overflow-x: auto !important;
+  word-break: normal !important;
+  margin: 1rem 0 !important;
+}
+
+.prose pre {
+  max-width: 100% !important;
+  overflow-x: auto !important;
+  word-break: break-all !important;
+  white-space: pre-wrap !important;
+}
+
+.prose td, .prose th {
+  word-break: break-word !important;
+}
+
+.prose {
+  word-break: break-word !important;
+  overflow-wrap: anywhere !important;
+  max-width: 100% !important;
+}
+
 /* スクロールバー */
 ::-webkit-scrollbar {
   width: 6px;

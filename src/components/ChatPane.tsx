@@ -42,9 +42,9 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-full bg-slate-950">
+    <div className="flex flex-col h-full w-full min-w-0 overflow-hidden bg-slate-950">
       {/* チャットヘッダーバー */}
-      <div className="h-10 border-b border-slate-800/80 px-4 flex items-center justify-between bg-slate-900/40">
+      <div className="h-10 border-b border-slate-800/80 px-4 flex items-center justify-between bg-slate-900/40 shrink-0">
         <span className="text-xs font-semibold text-slate-400">
           チャット対話 ({messages.length} 件)
         </span>
@@ -65,7 +65,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       </div>
 
       {/* メッセージ履歴 */}
-      <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-6 space-y-6 min-w-0">
         {messages.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-4">
             <div className="w-12 h-12 rounded-2xl bg-indigo-600/10 border border-indigo-500/20 flex items-center justify-center">
@@ -84,7 +84,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           messages.map((msg) => (
             <div
               key={msg.id}
-              className={`flex items-start space-x-3 group ${
+              className={`flex items-start space-x-3 group min-w-0 ${
                 msg.role === 'user' ? 'justify-end' : 'justify-start'
               }`}
             >
@@ -95,7 +95,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
               )}
 
               <div
-                className={`max-w-[85%] md:max-w-[75%] rounded-2xl p-4 shadow-sm text-sm relative ${
+                className={`max-w-[88%] md:max-w-[82%] min-w-0 overflow-hidden rounded-2xl p-4 shadow-sm text-sm relative ${
                   msg.role === 'user'
                     ? 'user-message-bubble bg-indigo-600 text-white rounded-br-none'
                     : 'bg-slate-900 border border-slate-800 text-slate-200 rounded-bl-none'

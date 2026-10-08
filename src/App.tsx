@@ -653,7 +653,7 @@ ${graphSummary ? `【ナレッジネットワーク関係性】\n${graphSummary}
 
         {/* 中央ペイン: チャット画面 */}
         <div
-          className={`h-full flex-1 md:block ${
+          className={`h-full flex-1 min-w-0 overflow-hidden md:block ${
             activeMobileTab === 'chat' ? 'w-full block' : 'hidden md:block'
           }`}
         >
