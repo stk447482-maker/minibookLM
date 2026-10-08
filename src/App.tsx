@@ -65,6 +65,7 @@ export const App: React.FC = () => {
   const [isGeneratingStudio, setIsGeneratingStudio] = useState(false);
   const [streamingStudioArtifact, setStreamingStudioArtifact] = useState<{ type: StudioTab; title: string; content: string } | null>(null);
   const studioAbortControllerRef = useRef<AbortController | null>(null);
+  const chatAbortControllerRef = useRef<AbortController | null>(null);
 
   const handleCancelStudio = () => {
     if (studioAbortControllerRef.current) {
@@ -287,6 +288,12 @@ export const App: React.FC = () => {
     setMessages(prev => [...prev, userMsg]);
     await dbService.saveMessage(userMsg);
 
+    if (chatAbortControllerRef.current) {
+      chatAbortControllerRef.current.abort();
+    }
+    const chatController = new AbortController();
+    chatAbortControllerRef.current = chatController;
+
     setIsGenerating(true);
     setStatusMessage('選択されたソースからハイブリッド検索中...');
 
@@ -295,7 +302,6 @@ export const App: React.FC = () => {
       let searchResults: any[] = [];
       let graphSummary = '';
       let fullDocsContext = '';
-      let totalContextChars = 0;
       let activeDocTitles: string[] = [];
 
       // モデル種別に応じた安全なトークン枠（WebGPUブラウザ: 2,000文字, Gemini: 60,000文字）
@@ -308,7 +314,6 @@ export const App: React.FC = () => {
         // 1. 選択された全ドキュメントの包括的コンテキストをモデルの許容文字数内で動的抽出
         const comp = await ragManager.getComprehensiveContext(activeProject.id, enabledDocIds, maxContextChars, query);
         fullDocsContext = comp.contextText;
-        totalContextChars = comp.totalChars;
         activeDocTitles = comp.docTitles;
         searchResults = comp.sources;
 
@@ -435,21 +440,17 @@ export const App: React.FC = () => {
 
       let systemPrompt = '';
       if (fullDocsContext) {
-        systemPrompt = `あなたは最高峰の分析力と洞察力を持つ専任リサーチアシスタントです。
-ユーザーの質問に対して、以下の【参照ドキュメント】に記載された具体的な数値（〇〇m、〇〇円、〇〇%など）、固有名詞、条項、条件を漏れなく引用し、的確かつ深い論理構成で回答してください。浅い要約や一般論だけで終わらせることは厳禁です。
+        systemPrompt = `あなたは提供資料に基づき正確に回答する専門リサーチAIです。
+【絶対遵守ルール】
+1. 質問に対する結論および具体的数値（〇〇m、〇〇円、〇〇%等）を冒頭でズバリ提示してください。
+2. 資料名【ドキュメント名】を明記し、記載事実のみを根拠に論理的に説明してください。資料外の一般論は厳禁です。
+3. 資料に記載がない事柄は「提供資料内に記載はありません」と明記してください。
 ${directFactsInstruction}
-【回答の絶対遵守ルール】
-1. **【結論・核心の数値】を冒頭で明示**: 質問で問われている具体的数値（例: 〇〇m、〇〇kg、〇〇円、条文番号等）や核心の結論を最初にズバリ答えてください。
-2. **【ドキュメント根拠の詳細解説】**: 資料名【ドキュメント名】を明記し、なぜその結論・仕様になるのか、背景や文脈を含めて詳しく説明してください。
-3. **【条件・制約・留意事項の網羅】**: 上限/下限、前提条件、例外規定、担当者、期日などがドキュメントにあれば、それらも漏れなく箇条書き等で補足してください。
-4. ドキュメントに一切記載のない事柄は「提供資料内に該当する記述はありません」と明記してください。
-
-【参照ドキュメント (選択中: ${activeDocTitles.join(', ')} / 計 ${totalContextChars.toLocaleString()} 文字)】
+【参照ドキュメント】
 ${fullDocsContext}
-
-${graphSummary ? `【ナレッジネットワーク関係性】\n${graphSummary}` : ''}`;
+${graphSummary ? `\n【ナレッジ関係性】\n${graphSummary}` : ''}`;
       } else {
-        systemPrompt = `あなたは親切で博識なAIアシスタントです。ユーザーの質問に対して論理的かつ分かりやすい日本語で丁寧に回答してください。`;
+        systemPrompt = `あなたは親切で博識なAIアシスタントです。論理的かつ分かりやすい日本語で丁寧に回答してください。`;
       }
 
       const assistantMsgId = `asst_${Date.now()}`;
@@ -467,23 +468,38 @@ ${graphSummary ? `【ナレッジネットワーク関係性】\n${graphSummary}
       setMessages(prev => [...prev, assistantMsg]);
       setStatusMessage(`ドキュメント (${activeDocTitles.length}件) を解析して回答生成中...`);
 
-      const recentMessages = config.mode === 'embedded-mobile' ? messages.slice(-4) : messages.slice(-10);
+      // 過去履歴は直近4件のみ & 各メッセージ250文字に圧縮して4Kトークン超過を絶対防止
+      const recentMessages = messages.slice(-4).map(m => ({
+        role: m.role,
+        content: m.content.length > 250 ? m.content.slice(0, 250) + '...' : m.content
+      }));
+
       const chatHistory: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
         { role: 'system', content: systemPrompt },
-        ...recentMessages.map(m => ({ role: m.role, content: m.content })),
+        ...recentMessages,
         { role: 'user', content: query }
       ];
 
-      const stream = llmService.streamChat(chatHistory, config, (prog) => {
-        setStatusMessage(prog);
-      });
+      const stream = llmService.streamChat(
+        chatHistory,
+        config,
+        (prog) => {
+          setStatusMessage(prog);
+        },
+        chatController.signal
+      );
 
       let accumulatedText = '';
       for await (const chunk of stream) {
+        if (chatController.signal.aborted) break;
         accumulatedText += chunk;
         setMessages(prev =>
           prev.map(m => (m.id === assistantMsgId ? { ...m, content: accumulatedText } : m))
         );
+      }
+
+      if (chatController.signal.aborted) {
+        return;
       }
 
       if (graphSummary && !accumulatedText.includes('GraphRAG')) {
@@ -502,6 +518,9 @@ ${graphSummary ? `【ナレッジネットワーク関係性】\n${graphSummary}
 
       await dbService.saveMessage(finalAssistantMsg);
     } catch (err: unknown) {
+      if (chatAbortControllerRef.current?.signal.aborted) {
+        return;
+      }
       const msg = err instanceof Error ? err.message : String(err);
       const errorMsg: ChatMessage = {
         id: `err_${Date.now()}`,
@@ -515,6 +534,7 @@ ${graphSummary ? `【ナレッジネットワーク関係性】\n${graphSummary}
     } finally {
       setIsGenerating(false);
       setStatusMessage('');
+      chatAbortControllerRef.current = null;
     }
   };
 

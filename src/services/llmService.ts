@@ -201,25 +201,28 @@ class LLMService {
       }
 
       if (this.engine) {
-        // 🛡️ WebLLM 4,096 トークン上限（Context Window Overflow）絶対防止セーフティ
+        // 🛡️ WebLLM 4,096 トークン上限（Context Window Overflow）全体統合予算ガード
         const safeMessages = messages.map((m) => {
           let text = m.content;
-          // システムプロンプト（参照ドキュメント含む）は最大2,200文字に自動クランプ
-          if (m.role === 'system' && text.length > 2200) {
-            text = text.slice(0, 2200) + '\n...[WebGPU 4Kトークン制限のため以降省略]';
-          } else if (m.role !== 'system' && text.length > 1000) {
-            text = text.slice(0, 1000);
+          // システムプロンプト（参照ドキュメント含む）は最大2,400文字まで許容
+          if (m.role === 'system' && text.length > 2400) {
+            text = text.slice(0, 2400) + '\n...[4Kトークン保護のため以降省略]';
+          } else if (m.role !== 'system' && text.length > 500) {
+            // 過去のチャット履歴は1メッセージ最大500文字に圧縮
+            text = text.slice(0, 500);
           }
           return { role: m.role, content: text };
         });
 
+        const effectiveTemp = typeof config.temperature === 'number' ? Math.max(0.1, Math.min(1.0, config.temperature)) : 0.2;
+
         const chunks = await this.engine.chat.completions.create({
           messages: safeMessages,
-          temperature: Math.max(0.45, config.temperature || 0.45),
-          top_p: 0.9,
-          frequency_penalty: 0.8,
-          presence_penalty: 0.6,
-          max_tokens: 1024,
+          temperature: effectiveTemp, // ファクト抽出に適した低温度 (0.2)
+          top_p: 0.85,
+          frequency_penalty: 0.3, // 数値や固有名詞の反復引用を妨げない低ペナルティ
+          presence_penalty: 0.3,
+          max_tokens: 800,
           stream: true
         });
 
@@ -230,12 +233,16 @@ class LLMService {
           if (delta) {
             accumulated += delta;
 
-            // 🛑 ループ暴走防止ガード（同一フレーズやセンテンスの繰り返しを検知して即切断）
-            if (accumulated.length > 100) {
-              const lastSentence = accumulated.slice(-60);
-              const priorText = accumulated.slice(0, -60);
-              if (priorText.includes(lastSentence) && lastSentence.trim().length > 15) {
-                break;
+            // 🛑 ループ暴走防止ガード: 同一センテンス・行が3回連続して出力された場合のみ即停止
+            if (accumulated.length > 80) {
+              const lines = accumulated.split(/[\n。]+/).map(s => s.trim()).filter(s => s.length > 6);
+              if (lines.length >= 3) {
+                const last = lines[lines.length - 1];
+                const prev1 = lines[lines.length - 2];
+                const prev2 = lines[lines.length - 3];
+                if (last === prev1 && last === prev2) {
+                  break;
+                }
               }
             }
 
