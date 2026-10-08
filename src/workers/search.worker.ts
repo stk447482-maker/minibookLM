@@ -78,7 +78,7 @@ function extractMetricsAndFacts(text: string): { metrics: string[]; keyFacts: st
     }
   }
 
-  const sentences = text.split(/[\n。]+/);
+  const sentences = text.split(/(?<=[。！？\n])/);
   for (const s of sentences) {
     const trimmed = s.trim();
     if (trimmed.length >= 8 && trimmed.length <= 160) {
@@ -91,6 +91,103 @@ function extractMetricsAndFacts(text: string): { metrics: string[]; keyFacts: st
   }
 
   return { metrics, keyFacts };
+}
+
+// 日本語類義語・同義語辞書（Query Expansion）
+const SYNONYM_DICT: Record<string, string[]> = {
+  '間隔': ['間隔', '離隔', '距離', 'クリアランス', 'スパン', 'ピッチ', '間'],
+  '距離': ['距離', '間隔', '離隔', 'クリアランス', 'スパン'],
+  '高さ': ['高さ', '高', '最低地上高', '地上高', '全高', 'クリアランス', '垂直'],
+  '期限': ['期限', '納期', '期日', '完了日', 'スケジュール', '締め切り', '日程'],
+  '金額': ['金額', '費用', '価格', '予算', 'コスト', '単価', '代金', '円', '料金'],
+  '割合': ['割合', '率', '比率', 'パーセント', '%', '％', '達成率', '進捗率'],
+  '条件': ['条件', '要件', '前提', '基準', '規定', '仕様', 'ルール', '制約'],
+  '要件': ['要件', '必須', '条件', '規定', '基準', '仕様'],
+  '仕様': ['仕様', 'スペック', '構成', '要件', '設計', '規格'],
+  '担当': ['担当', '責任者', '主幹', 'リーダー', '担当者', '窓口'],
+  '重量': ['重量', '重さ', '質量', 'kg', 'g', 't', '荷重'],
+  '面積': ['面積', '広さ', '平米', 'm2', '㎡', '坪'],
+  '温度': ['温度', '室温', '℃', '度', '気温'],
+  '台数': ['台数', '数量', '個数', '台', '個', '件', '員数']
+};
+
+// 質問からターゲット名詞・求められている単位を抽出
+function extractQueryEntitiesAndUnits(query: string): { targets: string[]; expandedTargets: string[]; askedUnits: string[] } {
+  const cleanQuery = query.replace(/[はがをにのへとでについて教えてどう何ですか知りたいありますか？\?]/g, ' ');
+  const rawWords = cleanQuery.split(/[\s,、。]+/).filter(w => w.length >= 2);
+  
+  const targets = [...new Set(rawWords)];
+  const expandedTargets = new Set<string>(targets);
+
+  for (const t of targets) {
+    for (const [key, synonyms] of Object.entries(SYNONYM_DICT)) {
+      if (t.includes(key) || key.includes(t) || synonyms.some(s => t.includes(s))) {
+        synonyms.forEach(s => expandedTargets.add(s));
+      }
+    }
+  }
+
+  // 質問で問われている単位の検出 (m, 円, %, kg, 秒 等)
+  const askedUnits: string[] = [];
+  const unitMatches = query.match(/(?:何|いくら|どれくらい)?(m|mm|cm|km|kg|g|t|%|％|円|万|億|台|個|件|人|分|秒|時間|日|年|月|条|項|号|℃|W|kW)/gi);
+  if (unitMatches) {
+    unitMatches.forEach(u => {
+      const clean = u.replace(/何|いくら|どれくらい/g, '').trim();
+      if (clean) askedUnits.push(clean);
+    });
+  }
+
+  return { targets, expandedTargets: Array.from(expandedTargets), askedUnits };
+}
+
+// チャンク本文から「質問ターゲット」と「数値・要件」の近傍共起ファクトをピンポイント抽出
+function extractProximityFacts(
+  query: string,
+  text: string,
+  docTitle: string
+): { targetedFacts: { target: string; value: string; sentence: string; docTitle: string }[]; proximityBoost: number } {
+  const { expandedTargets, askedUnits } = extractQueryEntitiesAndUnits(query);
+  const targetedFacts: { target: string; value: string; sentence: string; docTitle: string }[] = [];
+  let proximityBoost = 0;
+
+  const sentences = text.split(/(?<=[。！？\n])/).map(s => s.trim()).filter(s => s.length >= 6);
+
+  for (const sentence of sentences) {
+    let matchedTarget = '';
+    for (const target of expandedTargets) {
+      if (sentence.includes(target)) {
+        matchedTarget = target;
+        break;
+      }
+    }
+
+    if (matchedTarget) {
+      // 数値・単位または要件キーワードが同一センテンス内にあるか
+      const metricMatches = sentence.match(METRIC_PATTERN);
+      const hasRequirement = REQUIREMENT_PATTERN.test(sentence);
+
+      if (metricMatches || hasRequirement) {
+        let valueStr = metricMatches ? metricMatches.join(', ') : '【規定・要件】';
+        
+        // 求められている単位と一致する場合は最高位加点
+        const unitHit = askedUnits.some(u => sentence.toLowerCase().includes(u.toLowerCase()));
+        if (unitHit) {
+          proximityBoost += 0.5;
+        } else {
+          proximityBoost += 0.3;
+        }
+
+        targetedFacts.push({
+          target: matchedTarget,
+          value: valueStr,
+          sentence,
+          docTitle
+        });
+      }
+    }
+  }
+
+  return { targetedFacts: targetedFacts.slice(0, 5), proximityBoost: Math.min(0.8, proximityBoost) };
 }
 
 self.onmessage = async (e: MessageEvent) => {
@@ -178,14 +275,15 @@ self.onmessage = async (e: MessageEvent) => {
     try {
       const allowedSet = allowedDocIds ? new Set(allowedDocIds) : null;
 
-      // クエリを日本語形態素分解
+      // 1. クエリ意図・類義語展開
+      const { expandedTargets } = extractQueryEntitiesAndUnits(query);
       const tokenizedQuery = tokenizeJapanese(query);
 
-      // 1. BM25 キーワード検索（単語分割インデックスで検索）
+      // BM25 キーワード検索
       const oramaResults = await search(oramaDb, {
         term: tokenizedQuery || query,
         properties: ['tokenizedContent', 'content', 'docTitle'],
-        limit: 35
+        limit: 40
       });
 
       const candidateIds = new Set<string>();
@@ -196,35 +294,35 @@ self.onmessage = async (e: MessageEvent) => {
         }
       });
 
-      // 候補が少ない場合のフォールバック（直接部分一致チェックおよび全対象ドキュメントのチャンク網羅）
-      if (candidateIds.size < 10) {
-        const keywords = query.split(/[\s,、。]+/).filter(k => k.length >= 2);
-        for (const [chunkId, chunk] of chunksStore.entries()) {
-          if (!allowedSet || allowedSet.has(chunk.docId)) {
-            const hasMatch = keywords.some(kw => chunk.content.includes(kw));
-            if (hasMatch) {
-              candidateIds.add(chunkId);
-              if (candidateIds.size >= 50) break;
-            }
-          }
-        }
-
-        // キーワード一致でも候補が拾えなかった場合（要約・概要・全般的な質問など）、選択されたドキュメントの全チャンクを候補に投入
-        if (candidateIds.size < 5) {
-          for (const [chunkId, chunk] of chunksStore.entries()) {
-            if (!allowedSet || allowedSet.has(chunk.docId)) {
-              candidateIds.add(chunkId);
-              if (candidateIds.size >= 100) break;
-            }
+      // 2. 展開された類義語・キーワードによる直接共起スキャン
+      for (const [chunkId, chunk] of chunksStore.entries()) {
+        if (!allowedSet || allowedSet.has(chunk.docId)) {
+          const hasKeywordMatch = expandedTargets.some(kw => chunk.content.includes(kw) || chunk.parentContent.includes(kw));
+          if (hasKeywordMatch) {
+            candidateIds.add(chunkId);
+            if (candidateIds.size >= 60) break;
           }
         }
       }
 
-      // 2. ベクトル類似度 + 数値・単位・要件一致による高度スコアリング
-      const scoredResults: { chunk: DocumentChunk; score: number; metrics: string[]; keyFacts: string[] }[] = [];
+      // 候補が少ない場合の全チャンク投入フォールバック
+      if (candidateIds.size < 5) {
+        for (const [chunkId, chunk] of chunksStore.entries()) {
+          if (!allowedSet || allowedSet.has(chunk.docId)) {
+            candidateIds.add(chunkId);
+            if (candidateIds.size >= 80) break;
+          }
+        }
+      }
 
-      // クエリ内の数値や単位、要件キーワードの検出
-      const isAskingForMetrics = /m|mm|cm|km|kg|g|t|%|％|円|万|億|台|個|件|人|分|秒|時間|日|年|月|条|項|号|℃|W|kW|いくら|いつ|何m|何%|どれくらい|値|数値|数量|期間|金額|価格|予算|仕様|要件|条件|規定|基準/.test(query);
+      // 3. 近傍共起ファクト照合 & ベクトルスコアリング
+      const scoredResults: {
+        chunk: DocumentChunk;
+        score: number;
+        metrics: string[];
+        keyFacts: string[];
+        targetedFacts: { target: string; value: string; sentence: string; docTitle: string }[];
+      }[] = [];
 
       for (const chunkId of candidateIds) {
         const chunk = chunksStore.get(chunkId);
@@ -234,33 +332,27 @@ self.onmessage = async (e: MessageEvent) => {
         if (queryEmbedding && chunk.embedding) {
           score = cosineSimilarityInt8(queryEmbedding, chunk.embedding);
         } else {
-          score = 0.5;
+          score = 0.4;
         }
 
-        // 重要数値・単位およびキーファクトの抽出
+        // 🎯 近傍共起ファクト抽出（質問対象と数値が同一文にあるかを厳格判定）
+        const { targetedFacts, proximityBoost } = extractProximityFacts(query, chunk.parentContent || chunk.content, chunk.docTitle);
+        score += proximityBoost;
+
+        // 全体数値・要件抽出
         const { metrics, keyFacts } = extractMetricsAndFacts(chunk.parentContent || chunk.content);
 
-        // クエリが数値を求めており、チャンクに数値・単位が含まれる場合は大幅スコアブースト
-        if (isAskingForMetrics && metrics.length > 0) {
-          score += 0.35;
-        }
-
-        // 規定・要件キーワードが含まれている場合はスコアブースト
-        if (keyFacts.length > 0) {
-          score += 0.2;
-        }
-
-        // クエリキーワードの直接完全一致ブースト
+        // クエリキーワード直接一致ブースト
         if (query.length >= 3 && chunk.content.includes(query)) {
-          score += 0.4;
+          score += 0.3;
         }
 
-        scoredResults.push({ chunk, score, metrics, keyFacts });
+        scoredResults.push({ chunk, score, metrics, keyFacts, targetedFacts });
       }
 
       scoredResults.sort((a, b) => b.score - a.score);
 
-      // 3. 親コンテキストの重複排除（Parent-Document Deduplication）
+      // 4. 重複排除と最終結果の生成
       const seenParentContexts = new Set<string>();
       const finalResults: SourceReference[] = [];
 
@@ -276,7 +368,8 @@ self.onmessage = async (e: MessageEvent) => {
           fullContext: item.chunk.parentContent,
           score: Math.min(1.0, item.score),
           metrics: item.metrics,
-          keyFacts: item.keyFacts
+          keyFacts: item.keyFacts,
+          targetedFacts: item.targetedFacts
         });
 
         if (finalResults.length >= topK) break;

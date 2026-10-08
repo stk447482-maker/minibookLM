@@ -68,6 +68,7 @@ export interface SourceReference {
   score: number;
   metrics?: string[];
   keyFacts?: string[];
+  targetedFacts?: { target: string; value: string; sentence: string; docTitle: string }[];
 }
 
 export interface ChatMessage {

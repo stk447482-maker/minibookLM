@@ -307,7 +307,7 @@ export const App: React.FC = () => {
         }
       }
 
-      // 🎯 厳密RAG直接抽出モードの場合 (構造化ファクトシート生成)
+      // 🎯 厳密RAG直接抽出モードの場合 (質問ピンポイント構造化ファクトシート生成)
       if (isDirectRAG) {
         if (enabledDocIds.length === 0) {
           throw new Error('厳密RAG直接抽出を行うには、左側のドキュメント一覧で対象の資料にチェックを入れてください。');
@@ -316,11 +316,19 @@ export const App: React.FC = () => {
           throw new Error('選択されたドキュメント内に関連する該当箇所が見つかりませんでした。');
         }
 
-        // 全抽出結果から数値・単位・要件を網羅集約
+        // 1. 質問に直結する近傍共起ファクト（最優先ダイレクト回答）
+        const allTargetedFacts: { target: string; value: string; sentence: string; docTitle: string }[] = [];
         const allMetrics: { doc: string; value: string }[] = [];
         const allFacts: { doc: string; fact: string }[] = [];
 
         searchResults.forEach(r => {
+          if (r.targetedFacts) {
+            r.targetedFacts.forEach((tf: { target: string; value: string; sentence: string; docTitle: string }) => {
+              if (!allTargetedFacts.some((item: { target: string; value: string; sentence: string; docTitle: string }) => item.sentence === tf.sentence)) {
+                allTargetedFacts.push(tf);
+              }
+            });
+          }
           if (r.metrics) {
             r.metrics.forEach((m: string) => {
               if (!allMetrics.some((item: { doc: string; value: string }) => item.value === m)) {
@@ -338,13 +346,23 @@ export const App: React.FC = () => {
         });
 
         let directContent = `### 🎯 厳密RAG 構造化ファクトシート (選択資料: ${activeDocTitles.join(', ')})\n\n`;
-        directContent += `> 選択された **${enabledDocIds.length}** 件のドキュメント (計 ${totalContextChars.toLocaleString()} 文字) から重要数値・仕様・要件条文を直接抽出しました。\n\n`;
+
+        // 質問に直結するダイレクト回答ファクト
+        if (allTargetedFacts.length > 0) {
+          directContent += `#### 🏆 【質問に対するピンポイント特定ファクト】\n`;
+          directContent += `| 質問対象 | 特定された数値・要件 | 根拠センテンス (原文抜粋) | 出典資料 |\n`;
+          directContent += `| :--- | :--- | :--- | :--- |\n`;
+          allTargetedFacts.slice(0, 6).forEach((tf: { target: string; value: string; sentence: string; docTitle: string }) => {
+            directContent += `| **${tf.target}** | \`${tf.value}\` | ${tf.sentence} | ${tf.docTitle} |\n`;
+          });
+          directContent += `\n`;
+        }
 
         if (allMetrics.length > 0) {
-          directContent += `#### 📊 【抽出された重要数値・仕様・単位】\n`;
+          directContent += `#### 📊 【関連する重要数値・仕様・規定値一覧】\n`;
           directContent += `| 出典ドキュメント | 抽出された数値・仕様・規定値 |\n`;
           directContent += `| :--- | :--- |\n`;
-          allMetrics.slice(0, 15).forEach(m => {
+          allMetrics.slice(0, 10).forEach(m => {
             directContent += `| **${m.doc}** | \`${m.value}\` |\n`;
           });
           directContent += `\n`;
@@ -352,7 +370,7 @@ export const App: React.FC = () => {
 
         if (allFacts.length > 0) {
           directContent += `#### 📌 【該当する重要規定・決定事項・根拠センテンス】\n`;
-          allFacts.slice(0, 8).forEach(f => {
+          allFacts.slice(0, 6).forEach(f => {
             directContent += `- 💡 **[${f.doc}]**: ${f.fact}\n`;
           });
           directContent += `\n`;
@@ -385,11 +403,29 @@ export const App: React.FC = () => {
       }
 
       // 🤖 通常AI回答モード (深層ファクトグラウンディング & 的確な論理回答)
+      const allTargetedFacts: { target: string; value: string; sentence: string; docTitle: string }[] = [];
+      searchResults.forEach(r => {
+        if (r.targetedFacts) {
+          r.targetedFacts.forEach((tf: { target: string; value: string; sentence: string; docTitle: string }) => {
+            if (!allTargetedFacts.some((item: { target: string; value: string; sentence: string; docTitle: string }) => item.sentence === tf.sentence)) {
+              allTargetedFacts.push(tf);
+            }
+          });
+        }
+      });
+
+      let directFactsInstruction = '';
+      if (allTargetedFacts.length > 0) {
+        directFactsInstruction = `\n\n【🎯 質問に直結する確定データ（最優先で回答に使用すること）】\n` +
+          allTargetedFacts.slice(0, 4).map((tf: { target: string; value: string; sentence: string; docTitle: string }) => `- **[${tf.target}]**: \`${tf.value}\`\n  (根拠原文: 「${tf.sentence}」 出典: ${tf.docTitle})`).join('\n') +
+          `\n\n【必須命令】上記の確定データを第一声として明確に提示し、浅い一般論を一切述べず、このドキュメントの記述のみを根拠として的確に論理的説明を行ってください。\n`;
+      }
+
       let systemPrompt = '';
       if (fullDocsContext) {
         systemPrompt = `あなたは最高峰の分析力と洞察力を持つ専任リサーチアシスタントです。
 ユーザーの質問に対して、以下の【参照ドキュメント】に記載された具体的な数値（〇〇m、〇〇円、〇〇%など）、固有名詞、条項、条件を漏れなく引用し、的確かつ深い論理構成で回答してください。浅い要約や一般論だけで終わらせることは厳禁です。
-
+${directFactsInstruction}
 【回答の絶対遵守ルール】
 1. **【結論・核心の数値】を冒頭で明示**: 質問で問われている具体的数値（例: 〇〇m、〇〇kg、〇〇円、条文番号等）や核心の結論を最初にズバリ答えてください。
 2. **【ドキュメント根拠の詳細解説】**: 資料名【ドキュメント名】を明記し、なぜその結論・仕様になるのか、背景や文脈を含めて詳しく説明してください。
