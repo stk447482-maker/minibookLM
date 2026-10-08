@@ -208,13 +208,31 @@ class LLMService {
 
         const chunks = await this.engine.chat.completions.create({
           messages: safeMessages,
-          temperature: config.temperature,
+          temperature: Math.max(0.45, config.temperature || 0.45),
+          top_p: 0.9,
+          frequency_penalty: 0.8,
+          presence_penalty: 0.6,
+          max_tokens: 1024,
           stream: true
         });
 
+        let accumulated = '';
         for await (const chunk of chunks) {
           const delta = chunk.choices[0]?.delta?.content || '';
-          if (delta) yield delta;
+          if (delta) {
+            accumulated += delta;
+
+            // 🛑 ループ暴走防止ガード（同一フレーズやセンテンスの繰り返しを検知して即切断）
+            if (accumulated.length > 100) {
+              const lastSentence = accumulated.slice(-60);
+              const priorText = accumulated.slice(0, -60);
+              if (priorText.includes(lastSentence) && lastSentence.trim().length > 15) {
+                break;
+              }
+            }
+
+            yield delta;
+          }
         }
         return;
       }

@@ -455,15 +455,11 @@ ${graphSummary ? `【ナレッジネットワーク関係性】\n${graphSummary}
       setMessages(prev => [...prev, assistantMsg]);
       setStatusMessage(`ドキュメント (${activeDocTitles.length}件) を解析して回答生成中...`);
 
-      const userPromptWithContext = fullDocsContext
-        ? `【質問】${query}\n\n(※提供ドキュメント【${activeDocTitles.join(', ')}】に書かれている具体的な数値（〇〇m等）、要件、根拠条項を漏れなく引用し、的を射た深い分析と結論を日本語で回答してください)`
-        : query;
-
       const recentMessages = config.mode === 'embedded-mobile' ? messages.slice(-4) : messages.slice(-10);
       const chatHistory: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
         { role: 'system', content: systemPrompt },
         ...recentMessages.map(m => ({ role: m.role, content: m.content })),
-        { role: 'user', content: userPromptWithContext }
+        { role: 'user', content: query }
       ];
 
       const stream = llmService.streamChat(chatHistory, config, (prog) => {
