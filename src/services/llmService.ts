@@ -201,20 +201,43 @@ class LLMService {
       }
 
       if (this.engine) {
-        // 🛡️ WebLLM トークンバッファガード（モデルのコンテキスト長に合わせた動的許容）
+        // 🛡️ 無限チャット対応スライディングウィンドウ＆厳格トークン予算ガード
+        // WebLLMのコンテキスト窓（4,096トークン）に対して、安全圏（入力最大2,400トークン ≒ 約2,600文字）を死守
         const isSmallModel = modelId.includes('0.5B');
-        const maxSysChars = isSmallModel ? 2800 : 5000;
-        const maxTokensToGen = isSmallModel ? 800 : 1500;
+        const maxSysChars = isSmallModel ? 1800 : 2600;
+        const maxTokensToGen = isSmallModel ? 600 : 1000;
 
-        const safeMessages = messages.map((m) => {
-          let text = m.content;
-          if (m.role === 'system' && text.length > maxSysChars) {
-            text = text.slice(0, maxSysChars) + '\n...[コンテキスト上限保護のため以降省略]';
-          } else if (m.role !== 'system' && text.length > 800) {
-            text = text.slice(0, 800);
+        // 1. システムプロンプトを安全上限でトリミング
+        const systemMsg = messages.find(m => m.role === 'system');
+        const nonSystemMsgs = messages.filter(m => m.role !== 'system');
+
+        const trimmedSystem = systemMsg ? {
+          role: 'system' as const,
+          content: systemMsg.content.slice(0, maxSysChars)
+        } : null;
+
+        // 2. 過去チャット履歴の自動スライディングウィンドウ（最新のやり取りから逆順に予算内で詰め込む）
+        const historyBudgetChars = 1000;
+        let usedHistoryChars = 0;
+        const safeHistory: { role: 'user' | 'assistant'; content: string }[] = [];
+
+        for (let i = nonSystemMsgs.length - 1; i >= 0; i--) {
+          const m = nonSystemMsgs[i];
+          const sliceLen = Math.min(m.content.length, 300);
+          if (usedHistoryChars + sliceLen > historyBudgetChars && safeHistory.length >= 1) {
+            break; // 予算オーバー時は古い会話を自動ドロップ（無限チャット化）
           }
-          return { role: m.role, content: text };
-        });
+          safeHistory.unshift({
+            role: m.role as 'user' | 'assistant',
+            content: m.content.slice(0, sliceLen)
+          });
+          usedHistoryChars += sliceLen;
+        }
+
+        const safeMessages = [
+          ...(trimmedSystem ? [trimmedSystem] : []),
+          ...safeHistory
+        ];
 
         const effectiveTemp = typeof config.temperature === 'number' ? Math.max(0.1, Math.min(1.0, config.temperature)) : 0.3;
 
