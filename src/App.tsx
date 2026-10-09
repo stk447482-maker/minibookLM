@@ -565,114 +565,115 @@ ${searchResults.map(s => `[資料: ${s.docTitle}]\n${s.fullContext}`).join('\n\n
     setIsGeneratingStudio(true);
     try {
       const enabledDocIds = enabledDocs.map(d => d.id);
+
+      // 🎯 モデルTierに応じた安全なStudioコンテキスト文字数予算
+      let studioContextMaxChars = 2200;
+      if (config.mode === 'cloud-gemini' || config.cloudApiKey) {
+        studioContextMaxChars = 30000;
+      } else if (config.mode === 'desktop-api') {
+        studioContextMaxChars = 8000;
+      } else if (config.embeddedModelId.includes('0.5B')) {
+        studioContextMaxChars = 1400;
+      }
+
       const { contextText: fullContext, docTitles } = await ragManager.getStudioOptimizedContext(
         activeProject.id,
         enabledDocIds,
-        customPrompt
+        customPrompt,
+        studioContextMaxChars
       );
 
       let prompt = '';
       let title = '';
 
-      const userRequirement = customPrompt ? `\n【ユーザーからの特別指示・こだわり条件】\n${customPrompt}\n` : '';
+      const userRequirement = customPrompt ? `\n【ユーザー指示】: ${customPrompt}\n` : '';
 
-      const studioSystemPrompt = `あなたは最高峰の分析力と洞察力を持つエグゼクティブ・アナリストです。
-提供された【参照ドキュメント】に記載された具体的な数値（〇〇m、〇〇円、〇〇%など）、固有名詞、条項、条件を漏れなく引用し、的確かつ実用性の極めて高いコンテンツを作成してください。
-【絶対遵守ルール】
-1. 浅い一般論（「〇〇の推進が重要である」など）や、どの文書にも当てはまるフワッとした文章は絶対に書かないこと。
-2. 必ずドキュメント内に記載された確定数値、仕様、担当者、期日、ルールを根拠として記述すること。
-3. ドキュメントに存在しない事実は捏造せず、記載されている情報のみを最大限深掘りして構造化すること。`;
+      const studioSystemPrompt = `あなたは最高峰のドキュメントアナリストです。提供された【参照ドキュメント】の数値・固有名詞・規定を正確に引用し、要求された形式で高品質な出力を生成してください。`;
 
       if (type === 'briefing') {
         title = customPrompt ? `要約: ${customPrompt.slice(0, 15)}...` : 'エグゼクティブ要約ブリーフィング';
-        prompt = `以下の資料群から、経営層や実務責任者が即座に判断・把握できる【高密度エグゼクティブ要約ブリーフィング】を作成してください。
-【必須構成】
+        prompt = `以下の資料群から、要点を網羅した【エグゼクティブ要約ブリーフィング】を作成してください。
 # 📑 エグゼクティブ・ブリーフィング
-## 1. 核心サマリー（本質を端的に要約）
-## 2. 確定仕様・主要数値データ（〇〇m、〇〇円、〇〇%などの重要数値を網羅した一覧表）
-## 3. 重要決定事項と背景
-## 4. 制約条件・リスク・留意事項
-## 5. 今後の推進ロードマップ / ネクストアクション
+## 1. 核心サマリー（全体像・主旨）
+## 2. 確定仕様・主要数値データ（数値・単位を表形式で整理）
+## 3. 重要決定事項と留意点
+## 4. ネクストアクション
 ${userRequirement}
 
 【参照資料】
 ${fullContext}`;
       } else if (type === 'minutes') {
         title = customPrompt ? `議事録: ${customPrompt.slice(0, 15)}...` : '会議議事録・決定事項・ToDo一覧';
-        prompt = `以下の資料（会議記録・文字起こし・メモ）から、ビジネス基準の高品質な【会議議事録】を作成してください。
-【必須構成】
-# 📝 会議議事録
-- **対象資料**: ${docTitles.join(', ')}
+        prompt = `以下の資料から実践的な【会議議事録】を作成してください。
+# 📝 会議議事録 (${docTitles.join(', ')})
 ## 1. 議題および目的
-## 2. 決定事項 (Decisions) - 確定した方針・数値を箇条書き
-## 3. 議論詳細・論点分析
-## 4. 保留事項・次回検討課題
-## 5. アクションプラン / ToDo一覧（Markdown表形式: | No | タスク内容 | 担当者 | 期日 | 成功基準/数値 |）
+## 2. 決定事項（確定方針・数値）
+## 3. 議論詳細
+## 4. ToDo / アクションプラン（| No | タスク | 担当 | 期日 | の表形式）
 ${userRequirement}
 
 【参照資料】
 ${fullContext}`;
       } else if (type === 'study_report') {
-        title = customPrompt ? `レポート: ${customPrompt.slice(0, 15)}...` : '詳細研究・調査分析レポート';
-        prompt = `以下の資料群を多角的に分析し、具体的な数値データと論理的洞察に満ちた【詳細研究・調査分析レポート】を作成してください。
-【必須構成】
+        title = customPrompt ? `レポート: ${customPrompt.slice(0, 15)}...` : '詳細調査・分析レポート';
+        prompt = `以下の資料群を深く分析し、【詳細調査分析レポート】を作成してください。
 # 📊 詳細調査分析レポート
-## 1. 調査背景と目的
-## 2. 定量データ分析・重要指標（資料内の数値を整理）
-## 3. 主要な発見（Key Findings）と本質的論点
-## 4. 課題・ボトルネックと具体的解決策
-## 5. 総合結論・提言
+## 1. 背景と調査目的
+## 2. 定量データ・主要指標分析
+## 3. 課題と具体的解決策
+## 4. 総合結論・提言
 ${userRequirement}
 
 【参照資料】
 ${fullContext}`;
       } else if (type === 'faq') {
         title = customPrompt ? `FAQ: ${customPrompt.slice(0, 15)}...` : '実践的想定問答集 (FAQ)';
-        prompt = `以下の資料内容から、実務や利用者が直面する疑問やクリティカルな論点を突いた【実践的想定問答集 (FAQ)】を5〜8問作成してください。
-一般的な質問ではなく、「資料内の具体的数値、条件、手続き、例外ケース、禁止事項」に基づいた深い質問と正確な回答を作成してください。
-【構成】各項目は「### Q: ...」「**A:** ...」「*（根拠: 資料内の〇〇規定/数値）*」の形式。
+        prompt = `以下の資料から、実務で重要となる【想定問答集 (FAQ)】を5〜6問作成してください。
+形式:
+### Q: [具体的な質問]
+**A:** [資料の数値・規定に基づいた明確な回答]
+*(根拠: 出典規定)*
 ${userRequirement}
 
 【参照資料】
 ${fullContext}`;
       } else if (type === 'learning_guide') {
         title = customPrompt ? `学習ガイド: ${customPrompt.slice(0, 15)}...` : '体系的マスター学習ガイド';
-        prompt = `以下の資料内容から、初学者が最短で専門知識を習得できる【体系的マスター学習ガイド】を作成してください。
-【必須構成】
+        prompt = `以下の資料から【マスター学習ガイド】を作成してください。
 # 🎓 体系的マスター学習ガイド
-## 1. 全体像とコアコンセプト
-## 2. 重要キーワード＆必須数値・仕様用語集（表形式）
-## 3. ステップ別実践ワークフロー / 学習ロードマップ
-## 4. 理解度チェック（選択式クイズ3問 ＋ 解答と資料に基づく解説）
+## 1. コアコンセプト
+## 2. 重要用語＆数値集（表形式）
+## 3. 実践ロードマップ
+## 4. 理解度クイズ（3問 ＋ 正解・解説）
 ${userRequirement}
 
 【参照資料】
 ${fullContext}`;
       } else if (type === 'slide') {
         title = customPrompt ? `スライド: ${customPrompt.slice(0, 15)}...` : 'Marp プレゼンテーションスライド';
-        prompt = `以下の資料内容を分析し、プレゼンテーション用スライド（Marp Markdown形式）を作成してください。
-【ルール】
-- 冒頭に <!-- theme: default --> を付与
-- 各スライドは --- で区切る
-- スライド1: タイトル・サブタイトル
-- スライド2: アジェンダ
-- スライド3以降: 課題背景、主要数値・確定仕様（表または箇条書き）、重要施策、結論
-- スライドの1ページあたり文字数は適度に絞り、箇条書きと太字を活用
+        prompt = `以下の資料からMarp形式のプレゼンテーションスライドを作成してください。各スライドは --- で区切ってください。
+<!-- theme: default -->
+# スライドタイトル
+## サブタイトル
+---
+# アジェンダ
+---
+# 主要データ・仕様
+---
+# 結論・アクション
 ${userRequirement}
 
 【参照資料】
 ${fullContext}`;
       } else if (type === 'mindmap') {
         title = customPrompt ? `マインドマップ: ${customPrompt.slice(0, 15)}...` : 'マインドマップ';
-        prompt = `以下の資料の構造を分析し、中心テーマと主要な枝・項目をシンプルなJSON形式のみで出力してください（解説不要、\`\`\`json\`\`\`ブロックのみ）:
+        prompt = `以下の資料の中心テーマと階層構造を抽出してください。JSON形式または箇条書きMarkdownで出力してください:
 \`\`\`json
 {
   "root": "中心テーマ",
   "branches": [
-    {
-      "name": "主要項目1",
-      "items": ["具体的数値や仕様1", "具体的数値や仕様2"]
-    }
+    {"name": "主要項目1", "items": ["詳細1", "詳細2"]},
+    {"name": "主要項目2", "items": ["詳細1", "詳細2"]}
   ]
 }
 \`\`\`
@@ -682,13 +683,13 @@ ${userRequirement}
 ${fullContext}`;
       } else if (type === 'flowchart') {
         title = customPrompt ? `フローチャート: ${customPrompt.slice(0, 15)}...` : '業務処理フローチャート';
-        prompt = `以下の資料の業務プロセスや処理手順を抽出し、シンプルなJSON形式のみで出力してください（解説不要、\`\`\`json\`\`\`ブロックのみ）:
+        prompt = `以下の資料の手順や業務フローを抽出してください。JSON形式または箇条書きで出力してください:
 \`\`\`json
 {
   "steps": [
     {"action": "開始・受付"},
-    {"action": "審査・確認", "condition": true, "yes": "承認", "no": "差戻し"},
-    {"action": "処理完了"}
+    {"action": "審査・条件確認", "condition": true, "yes": "承認", "no": "差戻し"},
+    {"action": "完了"}
   ]
 }
 \`\`\`
@@ -698,15 +699,15 @@ ${userRequirement}
 ${fullContext}`;
       } else if (type === 'graph3d') {
         title = customPrompt ? `3Dグラフ: ${customPrompt.slice(0, 15)}...` : '3D ナレッジグラフデータ';
-        prompt = `以下の資料から主要な概念（ノード）と関係性（リンク）を抽出し、必ず以下のJSONフォーマットのみで出力してください（解説不要、\`\`\`json\`\`\`ブロックのみ）:
+        prompt = `以下の資料から主要概念ノードと関係性リンクを抽出し、以下のJSON形式のみで出力してください:
 \`\`\`json
 {
   "nodes": [
-    {"id": "1", "name": "主要概念名1", "val": 15, "color": "#6366f1"},
-    {"id": "2", "name": "主要概念名2", "val": 10, "color": "#10b981"}
+    {"id": "1", "name": "概念A", "val": 15, "color": "#6366f1"},
+    {"id": "2", "name": "概念B", "val": 10, "color": "#10b981"}
   ],
   "links": [
-    {"source": "1", "target": "2", "label": "関係性の説明"}
+    {"source": "1", "target": "2", "label": "関連"}
   ]
 }
 \`\`\`
@@ -716,10 +717,10 @@ ${userRequirement}
 ${fullContext}`;
       } else if (type === 'podcast') {
         title = customPrompt ? `ポッドキャスト: ${customPrompt.slice(0, 15)}...` : 'ポッドキャスト対話スクリプト';
-        prompt = `以下の資料を題材に、ホスト（アレックス: 親しみやすく鋭い質問役）と専門家（サクラ: 資料の数値や仕様を熟知した解説役）による、知的好奇心を刺激する【ポッドキャスト対話スクリプト】を作成してください。
-【ルール】
-- 一般論でお茶を濁さず、資料に書かれた具体的な数値（〇〇m、〇〇%など）、背景、裏話、注意点にフォーカスすること。
-- 対話フォーマット: **アレックス:** ... / **サクラ:** ...
+        prompt = `以下の資料を題材に、ホスト（アレックス）と解説役（サクラ）による【ポッドキャスト対話スクリプト】を作成してください。
+形式:
+**アレックス:** [親しみやすい質問]
+**サクラ:** [資料の確定数値や背景を踏まえた解説]
 ${userRequirement}
 
 【参照資料】
