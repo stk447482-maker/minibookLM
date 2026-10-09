@@ -75,8 +75,11 @@ self.onmessage = async (e: MessageEvent) => {
       for (let i = 0; i < total; i += BATCH_SIZE) {
         const batch = chunks.slice(i, i + BATCH_SIZE);
         
-        // e5モデル向けの "passage: " プレフィックス付与
-        const texts = batch.map((c: { text: string }) => `passage: ${c.text.trim()}`);
+        // Multilingual-E5モデル向けの "passage: " プレフィックスを厳格付与
+        const texts = batch.map((c: { text: string }) => {
+          const raw = c.text.trim();
+          return raw.startsWith('passage:') ? raw : `passage: ${raw}`;
+        });
         
         const output = await extractor(texts, { pooling: 'mean', normalize: true });
         const embeddingsArray = output.tolist();
@@ -114,8 +117,10 @@ self.onmessage = async (e: MessageEvent) => {
     }
 
     try {
-      // e5モデル向けの "query: " プレフィックス
-      const output = await extractor(`query: ${query.trim()}`, { pooling: 'mean', normalize: true });
+      // Multilingual-E5モデル向けの "query: " プレフィックスを厳格付与
+      const qText = query.trim();
+      const formatted = qText.startsWith('query:') ? qText : `query: ${qText}`;
+      const output = await extractor(formatted, { pooling: 'mean', normalize: true });
       const rawVec = output.tolist()[0];
       const int8Vec = quantizeToInt8(rawVec);
       self.postMessage({ type: 'QUERY_EMBED_SUCCESS', payload: { embedding: int8Vec }, id });

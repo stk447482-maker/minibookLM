@@ -614,6 +614,18 @@ class RAGManager {
           }
         });
       }
+      if (r.keyFacts) {
+        r.keyFacts.forEach(kf => {
+          if (!allTargetedFacts.some(f => f.sentence === kf)) {
+            allTargetedFacts.push({
+              target: '重要規定・数値',
+              value: kf.slice(0, 40),
+              sentence: kf,
+              docTitle: r.docTitle
+            });
+          }
+        });
+      }
     });
 
     // 2. 根拠文の抽出（Context Window Expansion: 親ブロックから質問関連センテンスを特定）
@@ -622,7 +634,7 @@ class RAGManager {
 
     searchResults.forEach(r => {
       const full = r.fullContext || r.snippet;
-      const sentences = full.split(/(?<=[。！？\n])/).map(s => s.trim()).filter(s => s.length >= 8);
+      const sentences = full.split(/(?<=[。！？\n])/).map(s => s.trim()).filter(s => s.length >= 6);
 
       sentences.forEach(s => {
         const sLower = s.toLowerCase();
@@ -637,9 +649,9 @@ class RAGManager {
           }
         }
 
-        // 制約・注意点・条件文の抽出
-        if (/必須|要件|条件|規定|禁止|但し|ただし|上限|下限|以上|以下|未満|注意|留意|原則/.test(s)) {
-          if (!constraints.includes(s) && constraints.length < 4) {
+        // 🎯 法令・制約・注意点・条件文の抽出
+        if (/第\d+条|必須|要件|条件|規定|禁止|但し|ただし|上限|下限|以上|以下|未満|超|注意|留意|原則|適用|除外|免責|技術基準|安全率/.test(s)) {
+          if (!constraints.includes(s) && constraints.length < 6) {
             constraints.push(`[${r.docTitle}] ${s}`);
           }
         }
@@ -647,9 +659,9 @@ class RAGManager {
     });
 
     evidenceSentences.sort((a, b) => b.score - a.score);
-    const topEvidence = evidenceSentences.slice(0, 4);
+    const topEvidence = evidenceSentences.slice(0, 6);
 
-    const hasMatch = allTargetedFacts.length > 0 || topEvidence.length > 0 || (searchResults[0]?.score || 0) > 0.4;
+    const hasMatch = allTargetedFacts.length > 0 || topEvidence.length > 0 || (searchResults[0]?.score || 0) > 0.35;
 
     if (!hasMatch) {
       return {
@@ -662,29 +674,29 @@ class RAGManager {
       };
     }
 
-    // 3. 0.5B用の超高密度プロンプト用テキスト（余計なトークンを徹底排除）
+    // 3. 超高密度プロンプト用テキスト（確固たるエビデンス構造）
     let formattedContextForLLM = '';
     if (allTargetedFacts.length > 0) {
-      formattedContextForLLM += '【核心ファクト・数値】\n' +
-        allTargetedFacts.slice(0, 3).map(f => `・${f.target}: ${f.value} （出典: ${f.docTitle}）`).join('\n') + '\n\n';
+      formattedContextForLLM += '【核心ファクト・確定数値・条項】\n' +
+        allTargetedFacts.slice(0, 6).map(f => `・${f.target}: ${f.value} （原文: 「${f.sentence}」 出典: ${f.docTitle}）`).join('\n') + '\n\n';
     }
 
     if (topEvidence.length > 0) {
-      formattedContextForLLM += '【原文根拠】\n' +
-        topEvidence.slice(0, 3).map(e => `・「${e.sentence}」 （出典: ${e.docTitle}）`).join('\n') + '\n\n';
+      formattedContextForLLM += '【原文根拠抜粋】\n' +
+        topEvidence.slice(0, 5).map(e => `・「${e.sentence}」 （出典: ${e.docTitle}）`).join('\n') + '\n\n';
     }
 
     if (constraints.length > 0) {
-      formattedContextForLLM += '【関連条件・留意事項】\n' +
-        constraints.slice(0, 2).map(c => `・${c}`).join('\n') + '\n';
+      formattedContextForLLM += '【関連法令・条件・留意事項】\n' +
+        constraints.slice(0, 4).map(c => `・${c}`).join('\n') + '\n';
     }
 
     // 4. UI表示用の確定エビデンスカード（Markdown）
     let rawEvidenceCard = '\n\n---\n\n#### 📑 【アルゴリズム抽出 根拠エビデンス】\n';
     if (allTargetedFacts.length > 0) {
-      rawEvidenceCard += '| 項目・仕様 | 確定値 | 根拠原文 | 出典資料 |\n';
+      rawEvidenceCard += '| 項目・仕様・条項 | 確定値 | 根拠原文 | 出典資料 |\n';
       rawEvidenceCard += '| :--- | :--- | :--- | :--- |\n';
-      allTargetedFacts.slice(0, 4).forEach(f => {
+      allTargetedFacts.slice(0, 6).forEach(f => {
         rawEvidenceCard += `| **${f.target}** | \`${f.value}\` | ${f.sentence} | ${f.docTitle} |\n`;
       });
       rawEvidenceCard += '\n';
@@ -700,9 +712,9 @@ class RAGManager {
 
     return {
       hasMatch: true,
-      facts: allTargetedFacts.slice(0, 4),
+      facts: allTargetedFacts.slice(0, 6),
       evidenceSentences: topEvidence.map(e => ({ docTitle: e.docTitle, sentence: e.sentence })),
-      constraints: constraints.slice(0, 3),
+      constraints: constraints.slice(0, 4),
       formattedContextForLLM: formattedContextForLLM.trim(),
       rawEvidenceCard: rawEvidenceCard.trim()
     };

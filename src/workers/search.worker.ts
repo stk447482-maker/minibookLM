@@ -13,20 +13,41 @@ const segmenter = typeof Intl !== 'undefined' && 'Segmenter' in Intl
   ? new (Intl as any).Segmenter('ja', { granularity: 'word' })
   : null;
 
-// 日本語テキストを単語（形態素）に分割して空白区切りテキストに変換
+// 法令・数値・技術単位・複合語の正規表現（トークン分割時に破壊しないよう保護）
+const COMPOUND_PROTECT_REGEX = /([第\d]+条(?:の\d+)?(?:第\d+項)?(?:第\d+号)?|別表第\d+|政令第\d+号|省令第\d+号|\b\d+(?:\.\d+)?\s*(?:m2|m3|㎡|㎥|立米|平米|mm|cm|km|m|kgf|kg|g|t|Pa|kPa|MPa|bar|kW|kWh|W|V|kV|A|mA|Hz|kHz|MHz|GHz|dB|℃|度|ppm|%|％|割|円|万円|億円|千円|ヶ月|か月|カ月|年|月|日|時間|分|秒|人|台|個|件|名|倍)\b|[A-Za-z0-9_\-\.]{3,})/gi;
+
+// 日本語テキストを単語（形態素）に分割し、複合語・数値・条文を統合して空白区切りテキストに変換
 function tokenizeJapanese(text: string): string {
   if (!text) return '';
-  if (!segmenter) return text;
 
   const words: string[] = [];
-  const segments = segmenter.segment(text);
-  for (const seg of segments) {
-    const w = seg.segment.trim();
-    // 1文字の助詞・記号を除外して意味のある単語を抽出
-    if (w.length > 0 && !/^[\s、。！？,.\(\)\[\]「」『』・:;]+$/.test(w)) {
-      words.push(w);
-    }
+
+  // 1. 複合語・条文・数値単位を抽出して最優先トークンとして登録
+  const compounds = text.match(COMPOUND_PROTECT_REGEX);
+  if (compounds) {
+    compounds.forEach(c => {
+      const clean = c.trim();
+      if (clean.length >= 2 && !words.includes(clean)) {
+        words.push(clean);
+      }
+    });
   }
+
+  // 2. 形態素解析による単語抽出
+  if (segmenter) {
+    const segments = segmenter.segment(text);
+    for (const seg of segments) {
+      const w = seg.segment.trim();
+      if (w.length > 0 && !/^[\s、。！？,.\(\)\[\]「」『』・:;／/\\\|\-\+=]+$/.test(w)) {
+        if (!words.includes(w)) {
+          words.push(w);
+        }
+      }
+    }
+  } else {
+    words.push(...text.split(/[\s,、。！？\n]+/));
+  }
+
   return words.join(' ');
 }
 
@@ -57,11 +78,11 @@ async function initOrama() {
   });
 }
 
-// 数値・単位パターン (15m, 2.5m, 100万円, 50%, 第3条, 2026年, 30秒, 500kW 等)
-const METRIC_PATTERN = /([^\s、。]{1,15}[:：\s]*)?(\b\d+(?:\.\d+)?\s*(?:m|mm|cm|km|kg|g|t|%|％|円|万|億|台|個|件|人|分|秒|時間|日|年|月|条|項|号|℃|W|kW|V|A|Hz|k|K|M|G|GB|MB|KB)\b|[第\d]+条(?:第\d+項)?)/gi;
+// 🎯 超高精度: 数値・単位・工学単位・法令条文・範囲の完全抽出パターン
+export const METRIC_PATTERN = /([^\s、。\n]{1,20}[:：\s]*)?([第\d]+条(?:の\d+)?(?:第\d+項)?(?:第\d+号)?|別表第\d+|政令第\d+号|省令第\d+号|告示第\d+号|\b\d+(?:\.\d+)?(?:\s*(?:〜|～|-|以上|以下|未満|超|以内|から|まで)\s*\d+(?:\.\d+)?)?\s*(?:m2|m3|㎡|㎥|立米|平米|mm|cm|km|m|kgf|kg|g|t|ton|Pa|kPa|MPa|bar|kW|kWh|W|MW|V|kV|A|mA|Hz|kHz|MHz|GHz|dB|℃|度|ppm|%|％|割|円|万円|億円|千円|ヶ月|か月|カ月|年|月|日|時間|分|秒|人|台|個|件|名|倍|点|箇所|本|枚|組|式)\b)/gi;
 
-// 重要要件・仕様・制約キーワード
-const REQUIREMENT_PATTERN = /必須|要件|規定|禁止|上限|下限|以上|以下|未満|決定|仕様|担当|期日|納期|合意|条件|基準|目標|原則|留意|注意|推奨/;
+// 🎯 重要要件・仕様・制約・法令キーワード（高感度検知）
+export const REQUIREMENT_PATTERN = /必須|要件|規定|規定する|定め|基準|準拠|仕様|規格|禁止|禁止事項|制限|制約|上限|下限|以上|以下|未満|超える|超|以内|決定|担当|期日|納期|合意|条件|前提条件|原則|原則として|留意|注意|推奨|義務|適用|除外|免責|罰則|法第|技術基準|安全率|許容値|離隔/;
 
 // チャンク本文から重要数値・単位とキー要件センテンスを抽出
 function extractMetricsAndFacts(text: string): { metrics: string[]; keyFacts: string[] } {
@@ -72,7 +93,7 @@ function extractMetricsAndFacts(text: string): { metrics: string[]; keyFacts: st
   if (matchedMetrics) {
     for (const m of matchedMetrics) {
       const clean = m.trim();
-      if (clean.length >= 2 && !metrics.includes(clean) && metrics.length < 8) {
+      if (clean.length >= 2 && !metrics.includes(clean) && metrics.length < 12) {
         metrics.push(clean);
       }
     }
@@ -81,9 +102,9 @@ function extractMetricsAndFacts(text: string): { metrics: string[]; keyFacts: st
   const sentences = text.split(/(?<=[。！？\n])/);
   for (const s of sentences) {
     const trimmed = s.trim();
-    if (trimmed.length >= 8 && trimmed.length <= 160) {
+    if (trimmed.length >= 6 && trimmed.length <= 200) {
       if (REQUIREMENT_PATTERN.test(trimmed)) {
-        if (!keyFacts.includes(trimmed) && keyFacts.length < 5) {
+        if (!keyFacts.includes(trimmed) && keyFacts.length < 8) {
           keyFacts.push(trimmed);
         }
       }
@@ -93,22 +114,28 @@ function extractMetricsAndFacts(text: string): { metrics: string[]; keyFacts: st
   return { metrics, keyFacts };
 }
 
-// 日本語類義語・同義語辞書（Query Expansion）
+// 🎯 網羅的日本語類義語・工学・法令同義語辞書（Query Expansion）
 const SYNONYM_DICT: Record<string, string[]> = {
-  '間隔': ['間隔', '離隔', '距離', 'クリアランス', 'スパン', 'ピッチ', '間'],
-  '距離': ['距離', '間隔', '離隔', 'クリアランス', 'スパン'],
-  '高さ': ['高さ', '高', '最低地上高', '地上高', '全高', 'クリアランス', '垂直'],
-  '期限': ['期限', '納期', '期日', '完了日', 'スケジュール', '締め切り', '日程'],
-  '金額': ['金額', '費用', '価格', '予算', 'コスト', '単価', '代金', '円', '料金'],
-  '割合': ['割合', '率', '比率', 'パーセント', '%', '％', '達成率', '進捗率'],
-  '条件': ['条件', '要件', '前提', '基準', '規定', '仕様', 'ルール', '制約'],
-  '要件': ['要件', '必須', '条件', '規定', '基準', '仕様'],
-  '仕様': ['仕様', 'スペック', '構成', '要件', '設計', '規格'],
-  '担当': ['担当', '責任者', '主幹', 'リーダー', '担当者', '窓口'],
-  '重量': ['重量', '重さ', '質量', 'kg', 'g', 't', '荷重'],
-  '面積': ['面積', '広さ', '平米', 'm2', '㎡', '坪'],
-  '温度': ['温度', '室温', '℃', '度', '気温'],
-  '台数': ['台数', '数量', '個数', '台', '個', '件', '員数']
+  '間隔': ['間隔', '離隔', '離隔距離', '距離', 'クリアランス', 'スパン', 'ピッチ', '間', '隙間'],
+  '離隔': ['離隔', '離隔距離', '間隔', '距離', '保安距離', 'クリアランス'],
+  '距離': ['距離', '間隔', '離隔', '離隔距離', 'クリアランス', 'スパン', '有効距離'],
+  '高さ': ['高さ', '高', '最低地上高', '地上高', '全高', 'クリアランス', '垂直距離', '深さ'],
+  '期限': ['期限', '納期', '期日', '完了日', 'スケジュール', '締め切り', '日程', '期間', '有効期間'],
+  '金額': ['金額', '費用', '価格', '予算', 'コスト', '単価', '代金', '円', '料金', '対価', '報酬', '損害金'],
+  '割合': ['割合', '率', '比率', 'パーセント', '%', '％', '達成率', '進捗率', '安全率', '係数'],
+  '条件': ['条件', '要件', '前提', '前提条件', '基準', '規定', '仕様', 'ルール', '制約', '適用条件'],
+  '要件': ['要件', '必須', '必要要件', '条件', '規定', '基準', '仕様', '規格'],
+  '仕様': ['仕様', 'スペック', '構成', '要件', '設計', '規格', '性能', '諸元'],
+  '担当': ['担当', '責任者', '主幹', 'リーダー', '担当者', '窓口', '管理者', '主任技術者', '監理技術者'],
+  '重量': ['重量', '重さ', '質量', '自重', 'kg', 'g', 't', '荷重', '積載荷重'],
+  '面積': ['面積', '広さ', '平米', 'm2', '㎡', '坪', '敷地面積', '延床面積', '建築面積'],
+  '温度': ['温度', '室温', '℃', '度', '気温', '耐熱温度', '上限温度', '冷却温度'],
+  '台数': ['台数', '数量', '個数', '台', '個', '件', '員数', '員数数'],
+  '法令': ['法令', '法律', '法', '条例', '政令', '省令', '規則', '技術基準', 'ガイドライン', '告示'],
+  '条項': ['条項', '条', '項', '号', '第1条', '第2条', '第3条', '第4条', '第5条', '別表', '附則'],
+  '圧力': ['圧力', '耐圧', '常用圧力', 'Pa', 'kPa', 'MPa', 'bar', '気圧'],
+  '電力': ['電力', '消費電力', '受電容量', '電圧', '電流', 'W', 'kW', 'kWh', 'V', 'A', 'Hz'],
+  '禁止': ['禁止', '不可', '禁止事項', '除外', '認められない', '対象外', '免責']
 };
 
 // 質問からターゲット名詞・求められている単位・否定/例外制約を抽出
