@@ -111,8 +111,16 @@ const SYNONYM_DICT: Record<string, string[]> = {
   '台数': ['台数', '数量', '個数', '台', '個', '件', '員数']
 };
 
-// 質問からターゲット名詞・求められている単位を抽出
-function extractQueryEntitiesAndUnits(query: string): { targets: string[]; expandedTargets: string[]; askedUnits: string[] } {
+// 質問からターゲット名詞・求められている単位・否定/例外制約を抽出
+function extractQueryEntitiesAndUnits(query: string): {
+  targets: string[];
+  expandedTargets: string[];
+  askedUnits: string[];
+  subQueries: string[];
+  isNegationQuery: boolean;
+} {
+  const isNegationQuery = /ない|除く|以外|含めない|不要|不可|禁止|制限|差|違い|比較/.test(query);
+
   const cleanQuery = query.replace(/[はがをにのへとでについて教えてどう何ですか知りたいありますか？\?]/g, ' ');
   const rawWords = cleanQuery.split(/[\s,、。]+/).filter(w => w.length >= 2);
   
@@ -137,22 +145,39 @@ function extractQueryEntitiesAndUnits(query: string): { targets: string[]; expan
     });
   }
 
-  return { targets, expandedTargets: Array.from(expandedTargets), askedUnits };
+  // 複合クエリのサブクエリ分解（「AとBの違い」「Aの条件およびBの納期」等）
+  const subQueries: string[] = [query];
+  const splitKeywords = query.split(/[と及びおよびならびに、・\s+vsVS対]/).map(s => s.trim()).filter(s => s.length >= 3);
+  if (splitKeywords.length >= 2) {
+    splitKeywords.forEach(sq => {
+      if (!subQueries.includes(sq)) subQueries.push(sq);
+    });
+  }
+
+  return {
+    targets,
+    expandedTargets: Array.from(expandedTargets),
+    askedUnits,
+    subQueries,
+    isNegationQuery
+  };
 }
 
-// チャンク本文から「質問ターゲット」と「数値・要件」の近傍共起ファクトをピンポイント抽出
+// 質問とテキスト内の近傍共起ファクト（質問対象語と数値・制約が同一センテンスまたは前後文にあるか）を検出
 function extractProximityFacts(
   query: string,
   text: string,
   docTitle: string
-): { targetedFacts: { target: string; value: string; sentence: string; docTitle: string }[]; proximityBoost: number } {
-  const { expandedTargets, askedUnits } = extractQueryEntitiesAndUnits(query);
+): { targetedFacts: { target: string; value: string; sentence: string; docTitle: string }[]; proximityBoost: number; constraintSentences: string[] } {
+  const { expandedTargets, askedUnits, isNegationQuery } = extractQueryEntitiesAndUnits(query);
   const targetedFacts: { target: string; value: string; sentence: string; docTitle: string }[] = [];
+  const constraintSentences: string[] = [];
   let proximityBoost = 0;
 
   const sentences = text.split(/(?<=[。！？\n])/).map(s => s.trim()).filter(s => s.length >= 6);
 
-  for (const sentence of sentences) {
+  for (let idx = 0; idx < sentences.length; idx++) {
+    const sentence = sentences[idx];
     let matchedTarget = '';
     for (const target of expandedTargets) {
       if (sentence.includes(target)) {
@@ -161,33 +186,51 @@ function extractProximityFacts(
       }
     }
 
+    // 制約・例外・ただし文の検出
+    if (/ただし|但し|を除く|対象外|除外|禁止|必須|上限|下限|以上|以下|未満|注意|留意|原則として/.test(sentence)) {
+      if (!constraintSentences.includes(sentence)) {
+        constraintSentences.push(sentence);
+      }
+    }
+
     if (matchedTarget) {
-      // 数値・単位または要件キーワードが同一センテンス内にあるか
-      const metricMatches = sentence.match(METRIC_PATTERN);
-      const hasRequirement = REQUIREMENT_PATTERN.test(sentence);
+      // 数値・単位または要件キーワードが同一センテンスまたは直後センテンスにあるか判定
+      const nextSentence = sentences[idx + 1] || '';
+      const combinedWindow = `${sentence} ${nextSentence}`;
+
+      const metricMatches = combinedWindow.match(METRIC_PATTERN);
+      const hasRequirement = REQUIREMENT_PATTERN.test(combinedWindow);
 
       if (metricMatches || hasRequirement) {
-        let valueStr = metricMatches ? metricMatches.join(', ') : '【規定・要件】';
+        const valueStr = metricMatches ? metricMatches.join(', ') : '【規定・要件】';
         
         // 求められている単位と一致する場合は最高位加点
-        const unitHit = askedUnits.some(u => sentence.toLowerCase().includes(u.toLowerCase()));
+        const unitHit = askedUnits.some(u => combinedWindow.toLowerCase().includes(u.toLowerCase()));
         if (unitHit) {
-          proximityBoost += 0.5;
+          proximityBoost += 0.6;
         } else {
-          proximityBoost += 0.3;
+          proximityBoost += 0.35;
+        }
+
+        if (isNegationQuery && /除く|以外|含めない|不可|禁止/.test(combinedWindow)) {
+          proximityBoost += 0.4;
         }
 
         targetedFacts.push({
           target: matchedTarget,
           value: valueStr,
-          sentence,
+          sentence: metricMatches ? sentence : combinedWindow.trim(),
           docTitle
         });
       }
     }
   }
 
-  return { targetedFacts: targetedFacts.slice(0, 5), proximityBoost: Math.min(0.8, proximityBoost) };
+  return {
+    targetedFacts: targetedFacts.slice(0, 6),
+    proximityBoost: Math.min(0.9, proximityBoost),
+    constraintSentences: constraintSentences.slice(0, 4)
+  };
 }
 
 self.onmessage = async (e: MessageEvent) => {
@@ -260,7 +303,7 @@ self.onmessage = async (e: MessageEvent) => {
   }
 
   if (type === 'HYBRID_SEARCH') {
-    const { query, queryEmbedding, allowedDocIds, topK = 4 } = payload as {
+    const { query, queryEmbedding, allowedDocIds, topK = 5 } = payload as {
       query: string;
       queryEmbedding?: number[];
       allowedDocIds?: string[];
@@ -275,97 +318,164 @@ self.onmessage = async (e: MessageEvent) => {
     try {
       const allowedSet = allowedDocIds ? new Set(allowedDocIds) : null;
 
-      // 1. クエリ意図・類義語展開
-      const { expandedTargets } = extractQueryEntitiesAndUnits(query);
-      const tokenizedQuery = tokenizeJapanese(query);
+      // 1. クエリ意図・類義語・サブクエリ展開
+      const { expandedTargets, subQueries } = extractQueryEntitiesAndUnits(query);
 
-      // BM25 キーワード検索
-      const oramaResults = await search(oramaDb, {
-        term: tokenizedQuery || query,
-        properties: ['tokenizedContent', 'content', 'docTitle'],
-        limit: 40
-      });
+      // 2. BM25 キーワード検索（サブクエリも含めて検索し、順位マップを生成）
+      const bm25RankMap = new Map<string, number>();
+      let bm25RankCounter = 1;
 
-      const candidateIds = new Set<string>();
-      oramaResults.hits.forEach(hit => {
-        const chunk = chunksStore.get(hit.id);
-        if (chunk && (!allowedSet || allowedSet.has(chunk.docId))) {
-          candidateIds.add(hit.id);
-        }
-      });
+      for (const sq of subQueries) {
+        const sqTokenized = tokenizeJapanese(sq);
+        const oramaResults = await search(oramaDb, {
+          term: sqTokenized || sq,
+          properties: ['tokenizedContent', 'content', 'docTitle'],
+          limit: 30
+        });
 
-      // 2. 展開された類義語・キーワードによる直接共起スキャン
+        oramaResults.hits.forEach(hit => {
+          const chunk = chunksStore.get(hit.id);
+          if (chunk && (!allowedSet || allowedSet.has(chunk.docId))) {
+            if (!bm25RankMap.has(hit.id)) {
+              bm25RankMap.set(hit.id, bm25RankCounter++);
+            }
+          }
+        });
+      }
+
+      const candidateIds = new Set<string>(bm25RankMap.keys());
+
+      // 3. 展開された類義語・キーワードによる直接共起スキャン
       for (const [chunkId, chunk] of chunksStore.entries()) {
         if (!allowedSet || allowedSet.has(chunk.docId)) {
           const hasKeywordMatch = expandedTargets.some(kw => chunk.content.includes(kw) || chunk.parentContent.includes(kw));
           if (hasKeywordMatch) {
-            candidateIds.add(chunkId);
-            if (candidateIds.size >= 60) break;
-          }
-        }
-      }
-
-      // 候補が少ない場合の全チャンク投入フォールバック
-      if (candidateIds.size < 5) {
-        for (const [chunkId, chunk] of chunksStore.entries()) {
-          if (!allowedSet || allowedSet.has(chunk.docId)) {
             candidateIds.add(chunkId);
             if (candidateIds.size >= 80) break;
           }
         }
       }
 
-      // 3. 近傍共起ファクト照合 & ベクトルスコアリング
+      // 候補が少ない場合の全チャンクスキャンフォールバック
+      if (candidateIds.size < 5) {
+        for (const [chunkId, chunk] of chunksStore.entries()) {
+          if (!allowedSet || allowedSet.has(chunk.docId)) {
+            candidateIds.add(chunkId);
+            if (candidateIds.size >= 100) break;
+          }
+        }
+      }
+
+      // 4. ベクトル類似度計算 ＆ ベクトル順位マップ生成
+      const vectorScores: { id: string; sim: number }[] = [];
+      for (const chunkId of candidateIds) {
+        const chunk = chunksStore.get(chunkId);
+        if (!chunk) continue;
+        let sim = 0.35;
+        if (queryEmbedding && chunk.embedding) {
+          sim = cosineSimilarityInt8(queryEmbedding, chunk.embedding);
+        }
+        vectorScores.push({ id: chunkId, sim });
+      }
+
+      vectorScores.sort((a, b) => b.sim - a.sim);
+      const vectorRankMap = new Map<string, number>();
+      vectorScores.forEach((item, idx) => {
+        vectorRankMap.set(item.id, idx + 1);
+      });
+
+      // 5. RRF (Reciprocal Rank Fusion) + Proximity Boost 統合スコアリング
+      const RRF_K = 60;
       const scoredResults: {
         chunk: DocumentChunk;
         score: number;
         metrics: string[];
         keyFacts: string[];
         targetedFacts: { target: string; value: string; sentence: string; docTitle: string }[];
+        expandedContext: string;
       }[] = [];
+
+      // 全チャンクリストをdocIdとchunkIndexで整理（Window Expansion用）
+      const docChunksMap = new Map<string, DocumentChunk[]>();
+      for (const chunk of chunksStore.values()) {
+        if (!docChunksMap.has(chunk.docId)) {
+          docChunksMap.set(chunk.docId, []);
+        }
+        docChunksMap.get(chunk.docId)!.push(chunk);
+      }
+      docChunksMap.forEach(list => list.sort((a, b) => a.chunkIndex - b.chunkIndex));
 
       for (const chunkId of candidateIds) {
         const chunk = chunksStore.get(chunkId);
         if (!chunk) continue;
 
-        let score = 0;
-        if (queryEmbedding && chunk.embedding) {
-          score = cosineSimilarityInt8(queryEmbedding, chunk.embedding);
-        } else {
-          score = 0.4;
+        const bm25Rank = bm25RankMap.get(chunkId) || 999;
+        const vecRank = vectorRankMap.get(chunkId) || 999;
+
+        const rrfScore = (1 / (RRF_K + bm25Rank)) + (1 / (RRF_K + vecRank));
+        let totalScore = rrfScore * 15;
+
+        // 🎯 Window Context Expansion: 前後チャンクを結合して文脈切れを解消
+        let expandedContext = chunk.parentContent || chunk.content;
+        const docList = docChunksMap.get(chunk.docId);
+        if (docList && docList.length > 1) {
+          const currentIdx = docList.findIndex(c => c.id === chunk.id);
+          if (currentIdx !== -1) {
+            const prev = docList[currentIdx - 1]?.content;
+            const next = docList[currentIdx + 1]?.content;
+            const parts: string[] = [];
+            if (prev) parts.push(prev);
+            parts.push(chunk.content);
+            if (next) parts.push(next);
+            expandedContext = parts.join('\n');
+          }
         }
 
-        // 🎯 近傍共起ファクト抽出（質問対象と数値が同一文にあるかを厳格判定）
-        const { targetedFacts, proximityBoost } = extractProximityFacts(query, chunk.parentContent || chunk.content, chunk.docTitle);
-        score += proximityBoost;
+        // 🎯 近傍共起ファクト照合 (extractProximityFacts)
+        const { targetedFacts, proximityBoost, constraintSentences } = extractProximityFacts(
+          query,
+          expandedContext,
+          chunk.docTitle
+        );
+        totalScore += proximityBoost;
 
         // 全体数値・要件抽出
-        const { metrics, keyFacts } = extractMetricsAndFacts(chunk.parentContent || chunk.content);
+        const { metrics, keyFacts } = extractMetricsAndFacts(expandedContext);
+        constraintSentences.forEach(c => {
+          if (!keyFacts.includes(c)) keyFacts.push(c);
+        });
 
-        // クエリキーワード直接一致ブースト
-        if (query.length >= 3 && chunk.content.includes(query)) {
-          score += 0.3;
+        // クエリ完全一致ブースト
+        if (query.length >= 3 && (chunk.content.includes(query) || expandedContext.includes(query))) {
+          totalScore += 0.3;
         }
 
-        scoredResults.push({ chunk, score, metrics, keyFacts, targetedFacts });
+        scoredResults.push({
+          chunk,
+          score: totalScore,
+          metrics,
+          keyFacts,
+          targetedFacts,
+          expandedContext
+        });
       }
 
       scoredResults.sort((a, b) => b.score - a.score);
 
-      // 4. 重複排除と最終結果の生成
-      const seenParentContexts = new Set<string>();
+      // 6. 重複排除と最終結果の生成
+      const seenDocSnippets = new Set<string>();
       const finalResults: SourceReference[] = [];
 
       for (const item of scoredResults) {
-        const parentKey = `${item.chunk.docId}_${item.chunk.parentContent.slice(0, 100)}`;
-        if (seenParentContexts.has(parentKey)) continue;
+        const snippetKey = `${item.chunk.docId}_${item.chunk.content.slice(0, 80)}`;
+        if (seenDocSnippets.has(snippetKey)) continue;
 
-        seenParentContexts.add(parentKey);
+        seenDocSnippets.add(snippetKey);
         finalResults.push({
           chunkId: item.chunk.id,
           docTitle: item.chunk.docTitle,
           snippet: item.chunk.content,
-          fullContext: item.chunk.parentContent,
+          fullContext: item.expandedContext,
           score: Math.min(1.0, item.score),
           metrics: item.metrics,
           keyFacts: item.keyFacts,

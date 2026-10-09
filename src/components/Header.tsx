@@ -90,7 +90,19 @@ export const Header: React.FC<HeaderProps> = ({
           ) : (
             <>
               <Zap className="w-3.5 h-3.5 text-emerald-400 fill-emerald-400" />
-              <span>⚡ WebGPU (0.5B+RAG)</span>
+              <span>
+                ⚡ WebGPU (
+                {config.embeddedModelId.includes('1.5B')
+                  ? '1.5B'
+                  : config.embeddedModelId.includes('0.5B')
+                  ? '0.5B'
+                  : config.embeddedModelId.includes('gemma')
+                  ? 'Gemma 2B'
+                  : config.embeddedModelId.includes('Llama')
+                  ? 'Llama 1B'
+                  : 'WebLLM'}
+                +RAG)
+              </span>
             </>
           )}
           <Settings className="w-3.5 h-3.5 text-slate-400 ml-1" />

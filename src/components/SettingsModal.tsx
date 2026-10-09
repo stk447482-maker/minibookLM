@@ -101,25 +101,32 @@ interface LocalModelItem {
 
 const MOBILE_RECOMMENDED_MODELS = [
   {
-    id: 'Qwen2.5-0.5B-Instruct-q4f16_1-MLC',
-    name: 'Qwen 2.5 0.5B Instruct (超軽量)',
-    size: '約350MB',
-    vram: 'RAM 1GB以上推奨 (スマホ・タブレット完全対応)',
-    desc: '超高速レスポンス・日本語対応・端末負荷が最も少ない推奨モデル'
+    id: 'Qwen2.5-1.5B-Instruct-q4f16_1-MLC',
+    name: 'Qwen 2.5 1.5B Instruct (推奨・高精度日本語)',
+    size: '約950MB',
+    vram: 'RAM 2GB以上推奨 (PC / 高性能スマホ対応)',
+    desc: '【推奨】日本語の論理的文脈結合・RAGファクト整理に最も優れたベストバランスモデル'
   },
   {
-    id: 'Qwen2.5-1.5B-Instruct-q4f16_1-MLC',
-    name: 'Qwen 2.5 1.5B Instruct (高精度)',
-    size: '約950MB',
-    vram: 'RAM 3GB以上推奨 (最新iPhone / Androidフラッグシップ)',
-    desc: '0.5Bより要約力とRAG精度が格段に向上したバランス型'
+    id: 'gemma-2-2b-it-q4f16_1-MLC',
+    name: 'Gemma 2 2B Instruct (Google公式)',
+    size: '約1.8GB',
+    vram: 'RAM 4GB / VRAM 3GB以上推奨',
+    desc: 'Google純正の推論特化モデル。論理的考察や英語混在資料に強み'
   },
   {
     id: 'Llama-3.2-1B-Instruct-q4f16_1-MLC',
     name: 'Llama 3.2 1B Instruct (Meta公式)',
     size: '約880MB',
-    vram: 'RAM 2.5GB以上推奨',
-    desc: 'Meta社の最新軽量モデル。論理的思考と正確な抜粋が得意'
+    vram: 'RAM 2GB以上推奨',
+    desc: 'Meta社の軽量モデル。高速レスポンスと簡潔な回答が得意'
+  },
+  {
+    id: 'Qwen2.5-0.5B-Instruct-q4f16_1-MLC',
+    name: 'Qwen 2.5 0.5B Instruct (超軽量・省電力)',
+    size: '約350MB',
+    vram: 'RAM 1GB以上推奨 (低スペック端末・スマホ完全対応)',
+    desc: '最速レスポンス・ダウンロード容量最小の超軽量モデル'
   }
 ];
 
