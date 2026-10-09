@@ -188,25 +188,34 @@ export const App: React.FC = () => {
     setIsProcessingDoc(true);
     setDocProgress(0);
 
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      try {
-        const { doc, chunks } = await ragManager.processDocument(file, activeProject.id, (percent) => {
-          setDocProgress(percent);
-        });
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        try {
+          const { doc, chunks } = await ragManager.processDocument(file, activeProject.id, (percent) => {
+            setDocProgress(percent);
+          });
 
-        await dbService.saveDocument(doc);
-        await dbService.saveChunks(chunks);
+          await dbService.saveDocument(doc);
+          await dbService.saveChunks(chunks);
 
-        setDocuments(prev => [...prev, doc]);
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        alert(`ドキュメント処理に失敗しました: ${msg}`);
+          setDocuments(prev => {
+            const exists = prev.some(d => d.id === doc.id);
+            return exists ? prev.map(d => d.id === doc.id ? doc : d) : [...prev, doc];
+          });
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          alert(`ドキュメント処理に失敗しました: ${msg}`);
+        }
       }
-    }
 
-    setIsProcessingDoc(false);
-    setDocProgress(0);
+      // 検索ワーカーのインデックスを最新状態に完全同期
+      const updatedChunks = await dbService.getChunksByProject(activeProject.id);
+      await ragManager.loadProjectChunks(updatedChunks);
+    } finally {
+      setIsProcessingDoc(false);
+      setDocProgress(0);
+    }
   };
 
   // 生成物やチャット回答を新しいソースとして追加
@@ -220,6 +229,8 @@ export const App: React.FC = () => {
       await dbService.saveChunks(chunks);
 
       setDocuments(prev => [...prev, doc]);
+      const updatedChunks = await dbService.getChunksByProject(activeProject.id);
+      await ragManager.loadProjectChunks(updatedChunks);
       alert(`「${title}」をソース一覧に追加しました！`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -250,8 +261,11 @@ export const App: React.FC = () => {
 
   // ドキュメント削除
   const handleRemoveDoc = async (id: string) => {
+    if (!activeProject) return;
     await dbService.deleteDocument(id);
     setDocuments(prev => prev.filter(d => d.id !== id));
+    const remainingChunks = await dbService.getChunksByProject(activeProject.id);
+    await ragManager.loadProjectChunks(remainingChunks);
   };
 
   // チャットメッセージ個別削除
