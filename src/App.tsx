@@ -303,10 +303,35 @@ export const App: React.FC = () => {
       let graphSummary = '';
       let activeDocTitles: string[] = [];
 
-      // モデル種別に応じた安全なトークン枠（WebGPUブラウザ: 2,000文字, Gemini: 60,000文字）
-      let maxContextChars = 2000;
+      // 🎯 モデル能力階層（Tier）の判定
+      // tier 1: 0.5B (超軽量・整文特化)
+      // tier 2: 1.0B〜2.5B (1.5B, Gemma 2B, Llama 1B: 構造化解説)
+      // tier 3: 7B〜8B以上 / クラウドGemini (NotebookLM級の多角的ディープ分析)
+      let modelTier: 1 | 2 | 3 = 2; // デフォルトはTier 2 (1.5B)
+      let maxContextChars = 3500;
+
       if (config.mode === 'cloud-gemini' || config.cloudApiKey) {
+        modelTier = 3;
         maxContextChars = 60000;
+      } else if (config.mode === 'desktop-api') {
+        const mName = (config.desktopModelName || '').toLowerCase();
+        if (mName.includes('8b') || mName.includes('7b') || mName.includes('14b') || mName.includes('llama3') || mName.includes('qwen2.5-7b')) {
+          modelTier = 3;
+          maxContextChars = 12000;
+        } else {
+          modelTier = 2;
+          maxContextChars = 4000;
+        }
+      } else {
+        // embedded-mobile (WebGPU)
+        const embId = config.embeddedModelId.toLowerCase();
+        if (embId.includes('0.5b')) {
+          modelTier = 1;
+          maxContextChars = 1500;
+        } else if (embId.includes('gemma') || embId.includes('1.5b') || embId.includes('1b')) {
+          modelTier = 2;
+          maxContextChars = 3500;
+        }
       }
 
       if (enabledDocIds.length > 0) {
@@ -316,13 +341,13 @@ export const App: React.FC = () => {
         searchResults = comp.sources;
 
         // 2. クエリ特化のハイブリッド検索（特定箇所フォーカス用）
-        const focusedHits = await ragManager.search(query, enabledDocIds, 4);
+        const focusedHits = await ragManager.search(query, enabledDocIds, 5);
         if (focusedHits.length > 0) {
           graphSummary = ragManager.extractGraphRAGTriples(focusedHits);
         }
       }
 
-      // 🎯 1. アルゴリズム側で9割の抽出を完結する「確定ファクト骨格」を構築
+      // 🎯 1. アルゴリズム側で確定ファクト骨格を構築
       const skeleton = ragManager.buildFactSkeleton(query, searchResults);
 
       // 🎯 2. 厳密RAGモードの場合: アルゴリズム抽出ファクトカードを直接出力
@@ -360,8 +385,8 @@ export const App: React.FC = () => {
         return;
       }
 
-      // 🎯 3. 通常AIチャット回答: 資料内に該当記述が一切ない場合は0.5Bに推論させずに即答（幻覚0%）
-      if (enabledDocIds.length > 0 && !skeleton.hasMatch) {
+      // 🎯 3. 通常AIチャット回答: 資料内に該当記述が一切ない場合の安全装置
+      if (enabledDocIds.length > 0 && !skeleton.hasMatch && modelTier === 1) {
         const noMatchMsg: ChatMessage = {
           id: `asst_${Date.now()}`,
           projectId: activeProject.id,
@@ -376,20 +401,45 @@ export const App: React.FC = () => {
         return;
       }
 
-      // 🎯 4. WebLLM (1.5B/0.5B) 用 超高密度・整文特化プロンプト
+      // 🎯 4. モデル階層（Tier）別の最適化プロンプト生成
       let systemPrompt = '';
-      if (skeleton.hasMatch) {
-        systemPrompt = `あなたは正確無比な文書回答アシスタントです。
-以下の【抽出された確定ファクト】と【関連条件・留意事項】に基づき、数値・固有名詞・条件を正確に反映した自然で流暢な日本語の回答を作成してください。
+      if (modelTier === 1) {
+        // 【Tier 1: 0.5B】超軽量・整文特化（ファクト固定・2〜3文）
+        systemPrompt = `あなたは文章整文アシスタントです。
+以下の【確定ファクト】に書かれた数値・固有名詞を1文字も変えずに、2〜3文の端的な敬体（です・ます調）で整えて出力してください。推測や無関係な解説は禁止です。
 
+${skeleton.formattedContextForLLM}`;
+      } else if (modelTier === 2) {
+        // 【Tier 2: 1.5B / Gemma 2B】構造化解説（結論 ＋ 詳細仕様・条件 ＋ 補足）
+        systemPrompt = `あなたは優秀なドキュメント分析アシスタントです。
+提供されたドキュメントのファクトおよび文脈に基づき、以下の構成でわかりやすく論理的な回答を作成してください。
+
+### 【回答構成ルール】
+1. **【結論】**: 冒頭で質問に対する回答と確定数値・重要仕様をズバリ明示する。
+2. **【詳細仕様・根拠】**: 理由や数値の背景、関連する規定内容を箇条書き等で整理して説明する。
+3. **【条件・留意点】**: 例外事項や前提条件がある場合は必ず言及する。
+
+【抽出された確定ファクト】
 ${skeleton.formattedContextForLLM}
 
-【厳格な回答ルール】
-1. 冒頭で結論と確定数値をズバリ明示すること。
-2. 資料に書かれている事実・数値のみを使用し、勝手な推測や無関係な一般論を混ぜないこと。
-3. 条件や例外規定がある場合は、それらも漏れなく言及して端的な敬体（です・ます調）でまとめること。`;
+【ドキュメント関連文脈】
+${searchResults.slice(0, 3).map(s => `[資料: ${s.docTitle}]\n${s.fullContext}`).join('\n\n')}`;
       } else {
-        systemPrompt = `あなたは親切で博識なAIアシスタントです。論理的かつ分かりやすい日本語で丁寧に回答してください。`;
+        // 【Tier 3: 7B〜8B / Gemini】多角的ディープ分析（NotebookLM級）
+        systemPrompt = `あなたは最高峰のナレッジアナリストです。
+提供された資料群を網羅的・多角的に分析し、質問に対して専門的かつ実践的なインサイトを提供する総合レポートを作成してください。
+
+### 【レポート構成】
+1. **エグゼクティブサマリー（結論・キーメトリクス）**: 確定数値とコアメッセージの明示
+2. **詳細分析・構造化解説**: 規定・仕様・手順・背景の論理的ブレイクダウン
+3. **制約事項・リスク・例外条件**: 留意すべきルールや適用外ケースの提示
+4. **横断的考察・インサイト**: 各資料間の関係性や実務上のポイント
+
+【抽出ファクト】
+${skeleton.formattedContextForLLM}
+
+【参照ドキュメント全文抜粋】
+${searchResults.map(s => `[資料: ${s.docTitle}]\n${s.fullContext}`).join('\n\n')}`;
       }
 
       const assistantMsgId = `asst_${Date.now()}`;
@@ -405,12 +455,21 @@ ${skeleton.formattedContextForLLM}
       };
 
       setMessages(prev => [...prev, assistantMsg]);
-      setStatusMessage(`確定ファクトを元に滑らかな回答を生成中...`);
+      setStatusMessage(
+        modelTier === 1
+          ? '0.5B で確定ファクトを整文中...'
+          : modelTier === 2
+          ? '1.5B で構造化解説を生成中...'
+          : 'ディープ分析レポートを生成中...'
+      );
 
-      // 過去履歴は直近2件のみ（各150文字）に圧縮して0.5Bの注意力を100%ファクトに集中
-      const recentMessages = messages.slice(-2).map(m => ({
+      // 過去履歴の長さをモデルTierに応じて調整
+      const historyLimit = modelTier === 1 ? -2 : modelTier === 2 ? -4 : -8;
+      const charLimit = modelTier === 1 ? 150 : modelTier === 2 ? 400 : 1200;
+
+      const recentMessages = messages.slice(historyLimit).map(m => ({
         role: m.role,
-        content: m.content.length > 150 ? m.content.slice(0, 150) + '...' : m.content
+        content: m.content.length > charLimit ? m.content.slice(0, charLimit) + '...' : m.content
       }));
 
       const chatHistory: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
@@ -441,12 +500,12 @@ ${skeleton.formattedContextForLLM}
         return;
       }
 
-      // 整文された自然な回答文の末尾に、アルゴリズム抽出の確定エビデンスカードを結合
+      // Tier 1 / Tier 2 では確定エビデンスカードを末尾に付与（透明性の確保）
       let finalAnswer = accumulatedText.trim();
-      if (skeleton.hasMatch && skeleton.rawEvidenceCard) {
+      if (skeleton.hasMatch && skeleton.rawEvidenceCard && !finalAnswer.includes('アルゴリズム抽出 根拠エビデンス')) {
         finalAnswer += skeleton.rawEvidenceCard;
       }
-      if (graphSummary && !finalAnswer.includes('GraphRAG')) {
+      if (graphSummary && !finalAnswer.includes('GraphRAG') && modelTier >= 2) {
         finalAnswer += `\n\n${graphSummary}`;
       }
 
