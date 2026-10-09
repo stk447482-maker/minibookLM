@@ -149,11 +149,44 @@ class RAGManager {
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
       const textContent = await page.getTextContent();
-      const pageText = textContent.items
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .map((item: any) => item.str)
-        .join(' ');
-      fullText += `\n--- [Page ${i}] ---\n${pageText}`;
+      
+      // 🎯 PDFテキストの高度なレイアウト復元・行結合（Sentence & Table Stitching）
+      // Y座標の変化を検知して不自然な改行を排除し、項目名と数値を確実に同一行に結合
+      let pageLines: string[] = [];
+      let currentLine = '';
+      let lastY: number | null = null;
+
+      for (const item of textContent.items as any[]) {
+        const str = item.str || '';
+        if (!str.trim()) continue;
+
+        const transform = item.transform;
+        const y = transform ? transform[5] : null;
+
+        if (lastY !== null && y !== null && Math.abs(y - lastY) > 5) {
+          // 改行検知
+          if (currentLine.trim()) {
+            pageLines.push(currentLine.trim());
+          }
+          currentLine = str;
+        } else {
+          // 同一行内のテキスト結合
+          currentLine += (currentLine.endsWith(' ') || str.startsWith(' ') ? '' : ' ') + str;
+        }
+        lastY = y;
+      }
+
+      if (currentLine.trim()) {
+        pageLines.push(currentLine.trim());
+      }
+
+      // 行末のハイフン結合や、数値と単位の分断を修復
+      let reconstructedPage = pageLines.join('\n')
+        .replace(/([第\d]+条)\s*\n\s*(第\d+項)/g, '$1 $2')
+        .replace(/(\d+(?:\.\d+)?)\s*\n\s*(m2|m3|㎡|㎥|mm|cm|km|m|kg|t|Pa|MPa|kW|kWh|W|V|A|Hz|dB|℃|%|％|円|万円|億円)/g, '$1$2')
+        .replace(/([^\n。]+[:：])\s*\n\s*([^\n]+)/g, '$1 $2');
+
+      fullText += `\n--- [Page ${i}] ---\n${reconstructedPage}`;
     }
 
     return fullText;

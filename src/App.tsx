@@ -5,7 +5,7 @@ import { ChatPane } from './components/ChatPane.tsx';
 import { StudioPane } from './components/StudioPane.tsx';
 import { SettingsModal } from './components/SettingsModal.tsx';
 import { AuthGate } from './components/AuthGate.tsx';
-import { DocumentSource, ChatMessage, StudioArtifact, StudioTab, ModelConfig, Project } from './types/index.ts';
+import { DocumentSource, ChatMessage, StudioArtifact, StudioTab, ModelConfig, Project, SourceReference } from './types/index.ts';
 import { ragManager } from './services/ragManager.ts';
 import { llmService } from './services/llmService.ts';
 import { dbService } from './services/db.ts';
@@ -335,19 +335,29 @@ export const App: React.FC = () => {
       }
 
       if (enabledDocIds.length > 0) {
-        // 1. 選択された全ドキュメントの包括的コンテキストをモデルの許容文字数内で動的抽出
+        // 🎯 1. 【最優先】クエリ特化のハイブリッド検索（核心ヒットを直接抽出）
+        const focusedHits = await ragManager.search(query, enabledDocIds, 6);
+        
+        // 2. ドキュメント全体の背景コンテキストを補足取得
         const comp = await ragManager.getComprehensiveContext(activeProject.id, enabledDocIds, maxContextChars, query);
         activeDocTitles = comp.docTitles;
-        searchResults = comp.sources;
 
-        // 2. クエリ特化のハイブリッド検索（特定箇所フォーカス用）
-        const focusedHits = await ragManager.search(query, enabledDocIds, 5);
+        // 核心ヒット（focusedHits）を先頭に、全体背景（comp.sources）を後方に結合
+        const mergedSources: SourceReference[] = [...focusedHits];
+        comp.sources.forEach(cs => {
+          if (!mergedSources.some(ms => ms.chunkId === cs.chunkId || ms.docTitle === cs.docTitle)) {
+            mergedSources.push(cs);
+          }
+        });
+
+        searchResults = mergedSources;
+
         if (focusedHits.length > 0) {
           graphSummary = ragManager.extractGraphRAGTriples(focusedHits);
         }
       }
 
-      // 🎯 1. アルゴリズム側で確定ファクト骨格を構築
+      // 🎯 核心ヒット群から確定ファクト骨格を構築
       const skeleton = ragManager.buildFactSkeleton(query, searchResults);
 
       // 🎯 2. 厳密RAGモードの場合: アルゴリズム抽出ファクトカードを直接出力
@@ -404,38 +414,38 @@ export const App: React.FC = () => {
       // 🎯 4. モデル階層（Tier）別の最適化プロンプト生成
       let systemPrompt = '';
       if (modelTier === 1) {
-        // 【Tier 1: 0.5B】超軽量・整文特化（ファクト固定・2〜3文）
-        systemPrompt = `あなたは文章整文アシスタントです。
-以下の【確定ファクト】に書かれた数値・固有名詞を1文字も変えずに、2〜3文の端的な敬体（です・ます調）で整えて出力してください。推測や無関係な解説は禁止です。
+        // 【Tier 1: 0.5B】超軽量・整文特化（ファクト固定・1〜2文でズバリ直答）
+        systemPrompt = `あなたは正確無比な整文アシスタントです。
+質問に対する核心の確定数値・規定を1行目でズバリ明示し、以下の【確定ファクト】に書かれた数値・固有名詞を1文字も変えずに簡潔な敬体（です・ます調）で回答してください。推測・一般論は禁止です。
 
 ${skeleton.formattedContextForLLM}`;
       } else if (modelTier === 2) {
-        // 【Tier 2: 1.5B / Gemma 2B】構造化解説（結論 ＋ 詳細仕様・条件 ＋ 補足）
-        systemPrompt = `あなたは優秀なドキュメント分析アシスタントです。
-提供されたドキュメントのファクトおよび文脈に基づき、以下の構成でわかりやすく論理的な回答を作成してください。
+        // 【Tier 2: 1.5B / Gemma 2B】構造化解説（核心アンサー ＋ 詳細仕様・根拠 ＋ 条件・例外）
+        systemPrompt = `あなたは最高精度のドキュメント分析アシスタントです。
+提供されたドキュメントのファクトおよび文脈に基づき、以下の構成で明快かつ論理的に回答を作成してください。
 
 ### 【回答構成ルール】
-1. **【結論】**: 冒頭で質問に対する回答と確定数値・重要仕様をズバリ明示する。
-2. **【詳細仕様・根拠】**: 理由や数値の背景、関連する規定内容を箇条書き等で整理して説明する。
-3. **【条件・留意点】**: 例外事項や前提条件がある場合は必ず言及する。
+1. **【結論】**: 1行目で質問に対する「核心の確定数値・対象・期間・規定」をズバリ直答する。
+2. **【詳細仕様・根拠条文】**: 規定の背景、詳細な寸法・金額・手順などを箇条書きで整理して説明する。
+3. **【条件・例外・留意点】**: 法令条項、例外事項、適用条件がある場合は必ず明記する。
 
-【抽出された確定ファクト】
+【抽出された確定ファクト・条項】
 ${skeleton.formattedContextForLLM}
 
-【ドキュメント関連文脈】
-${searchResults.slice(0, 3).map(s => `[資料: ${s.docTitle}]\n${s.fullContext}`).join('\n\n')}`;
+【核心参照箇所全文抜粋】
+${searchResults.slice(0, 4).map(s => `[資料: ${s.docTitle}]\n${s.fullContext}`).join('\n\n')}`;
       } else {
         // 【Tier 3: 7B〜8B / Gemini】多角的ディープ分析（NotebookLM級）
         systemPrompt = `あなたは最高峰のナレッジアナリストです。
 提供された資料群を網羅的・多角的に分析し、質問に対して専門的かつ実践的なインサイトを提供する総合レポートを作成してください。
 
 ### 【レポート構成】
-1. **エグゼクティブサマリー（結論・キーメトリクス）**: 確定数値とコアメッセージの明示
+1. **エグゼクティブサマリー（結論・キーメトリクス）**: 質問に対する確定数値とコアメッセージのズバリ明示
 2. **詳細分析・構造化解説**: 規定・仕様・手順・背景の論理的ブレイクダウン
 3. **制約事項・リスク・例外条件**: 留意すべきルールや適用外ケースの提示
 4. **横断的考察・インサイト**: 各資料間の関係性や実務上のポイント
 
-【抽出ファクト】
+【抽出ファクト・条項】
 ${skeleton.formattedContextForLLM}
 
 【参照ドキュメント全文抜粋】
