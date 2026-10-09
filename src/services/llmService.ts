@@ -201,28 +201,30 @@ class LLMService {
       }
 
       if (this.engine) {
-        // 🛡️ WebLLM 4,096 トークン上限（Context Window Overflow）全体統合予算ガード
+        // 🛡️ WebLLM トークンバッファガード（モデルのコンテキスト長に合わせた動的許容）
+        const isSmallModel = modelId.includes('0.5B');
+        const maxSysChars = isSmallModel ? 2800 : 5000;
+        const maxTokensToGen = isSmallModel ? 800 : 1500;
+
         const safeMessages = messages.map((m) => {
           let text = m.content;
-          // システムプロンプト（参照ドキュメント含む）は最大2,400文字まで許容
-          if (m.role === 'system' && text.length > 2400) {
-            text = text.slice(0, 2400) + '\n...[4Kトークン保護のため以降省略]';
-          } else if (m.role !== 'system' && text.length > 500) {
-            // 過去のチャット履歴は1メッセージ最大500文字に圧縮
-            text = text.slice(0, 500);
+          if (m.role === 'system' && text.length > maxSysChars) {
+            text = text.slice(0, maxSysChars) + '\n...[コンテキスト上限保護のため以降省略]';
+          } else if (m.role !== 'system' && text.length > 800) {
+            text = text.slice(0, 800);
           }
           return { role: m.role, content: text };
         });
 
-        const effectiveTemp = typeof config.temperature === 'number' ? Math.max(0.1, Math.min(1.0, config.temperature)) : 0.2;
+        const effectiveTemp = typeof config.temperature === 'number' ? Math.max(0.1, Math.min(1.0, config.temperature)) : 0.3;
 
         const chunks = await this.engine.chat.completions.create({
           messages: safeMessages,
-          temperature: effectiveTemp, // ファクト抽出に適した低温度 (0.2)
-          top_p: 0.85,
-          frequency_penalty: 0.3, // 数値や固有名詞の反復引用を妨げない低ペナルティ
-          presence_penalty: 0.3,
-          max_tokens: 800,
+          temperature: effectiveTemp,
+          top_p: 0.9,
+          frequency_penalty: 0.2,
+          presence_penalty: 0.2,
+          max_tokens: maxTokensToGen,
           stream: true
         });
 
