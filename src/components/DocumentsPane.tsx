@@ -295,18 +295,24 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
                       {doc.totalChunks} チャンク
                     </span>
                     <span>•</span>
-                    <span className="font-mono text-cyan-300">{doc.type.toUpperCase()}</span>
+                    <span className={`font-mono px-1 py-0.2 rounded text-[9px] ${
+                      doc.type === 'audio' ? 'bg-purple-900/60 text-purple-300 border border-purple-700/50' : 'text-cyan-300'
+                    }`}>
+                      {doc.type === 'audio' ? '🎙️ 音声' : doc.type.toUpperCase()}
+                    </span>
                   </div>
                 </div>
               </div>
 
-
               <button
-                onClick={() => onRemoveDoc(doc.id)}
-                className="opacity-0 group-hover:opacity-100 p-1 hover:bg-rose-500/20 text-slate-500 hover:text-rose-400 rounded transition-all ml-1"
-                title="削除"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRemoveDoc(doc.id);
+                }}
+                className="p-1.5 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 rounded-lg transition-all ml-1 shrink-0"
+                title="このドキュメントを削除"
               >
-                <Trash2 className="w-3.5 h-3.5" />
+                <Trash2 className="w-4 h-4" />
               </button>
             </div>
           ))
