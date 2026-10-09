@@ -5,6 +5,7 @@
 import * as pdfjsLib from 'pdfjs-dist';
 import { DocumentChunk, DocumentSource, SourceReference, FactSkeleton } from '../types/index.ts';
 import { dbService } from './db.ts';
+import { decodeAudioTo16kMono } from './audioDecoder.ts';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
 
@@ -202,36 +203,17 @@ class RAGManager {
     onProgress?.('音声データを読み込み・デコード中...', 10);
 
     try {
-      // 1. Web Audio API によるオーディオデコード
-      const arrayBuffer = await file.arrayBuffer();
-      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const decodedBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+      // 1. WAV / 音声ファイルを 16kHz モノラル Float32Array に安全デコード（メモリ上限回避）
+      const { audioData, durationSec } = await decodeAudioTo16kMono(file);
 
-      const durationSec = Math.round(decodedBuffer.duration);
-      const minutes = Math.floor(durationSec / 60);
-      const seconds = durationSec % 60;
+      const roundedDuration = Math.round(durationSec);
+      const minutes = Math.floor(roundedDuration / 60);
+      const seconds = roundedDuration % 60;
       const durationStr = `${minutes}分${seconds}秒`;
 
-      onProgress?.(`音声デコード完了 (${durationStr})。16kHzモノラルへ変換中...`, 25);
+      onProgress?.(`音声デコード完了 (${durationStr})。Whisperモデルを起動中...`, 30);
 
-      // 2. Whisper推論用の 16,000Hz モノラル Float32Array にネイティブリサンプリング
-      const targetSampleRate = 16000;
-      const offlineCtx = new OfflineAudioContext(
-        1,
-        Math.max(1, Math.ceil(decodedBuffer.duration * targetSampleRate)),
-        targetSampleRate
-      );
-      const source = offlineCtx.createBufferSource();
-      source.buffer = decodedBuffer;
-      source.connect(offlineCtx.destination);
-      source.start(0);
-
-      const resampledBuffer = await offlineCtx.startRendering();
-      const channelData = resampledBuffer.getChannelData(0);
-
-      onProgress?.('ローカル音声認識モデル (Whisper) を起動中...', 40);
-
-      // 3. Web Worker にて Whisper (ONNX) 音声認識を実行
+      // 2. Web Worker にて Whisper (ONNX) 音声認識を実行
       if (!this.whisperWorker) {
         this.whisperWorker = new Worker(new URL('../workers/whisper.worker.ts', import.meta.url), { type: 'module' });
       }
@@ -241,12 +223,14 @@ class RAGManager {
         chunks: { timestamp: [number, number | null]; text: string }[];
       }>((resolve, reject) => {
         const handler = (e: MessageEvent) => {
-          const { type, payload, message, percent, status } = e.data;
+          const { type, payload, message, percent, status, currentChunk, totalChunks, timeLabel } = e.data;
 
           if (type === 'DOWNLOAD_PROGRESS' && percent !== undefined) {
-            onProgress?.(`Whisperモデル読込中 (${percent}%)`, 40 + Math.round(percent * 0.3));
+            onProgress?.(`Whisperモデル読込中 (${percent}%)`, 30 + Math.round(percent * 0.2));
           } else if (type === 'STATUS' && status === 'transcribing') {
-            onProgress?.('Whisper推論実行中（文字起こし中）...', 75);
+            onProgress?.('Whisper推論実行中（文字起こし中）...', 50);
+          } else if (type === 'TRANSCRIBE_PROGRESS') {
+            onProgress?.(`文字起こし中: ${timeLabel || ''} (${currentChunk}/${totalChunks})`, 50 + Math.round(percent * 0.45));
           } else if (type === 'TRANSCRIBE_SUCCESS') {
             this.whisperWorker?.removeEventListener('message', handler);
             resolve(payload);
@@ -260,14 +244,14 @@ class RAGManager {
         this.whisperWorker!.postMessage({
           type: 'TRANSCRIBE_AUDIO',
           payload: {
-            audioData: channelData,
-            sampleRate: targetSampleRate,
+            audioData,
+            sampleRate: 16000,
             language: 'japanese'
           }
         });
       });
 
-      onProgress?.('文字起こし完了！ドキュメント登録中...', 95);
+      onProgress?.('文字起こし完了！ドキュメント登録中...', 98);
 
       // 4. 認識結果をRAG＆議事録生成に最適なマークダウン形式に整理
       let transcribedText = `## 🎙️ 音声/動画 文字起こしデータ (Whisper)\n`;

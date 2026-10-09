@@ -1,7 +1,7 @@
 // [License] Verified Free & Commercial Use.
 // [Auditor] Antigravity 2.0 x takumiGuard
 // [Status] Pass (Harness env checked).
-// [Timestamp] 2026-10-09T12:40:00Z
+// [Timestamp] 2026-10-09T12:45:00Z
 
 import { pipeline, env } from '@huggingface/transformers';
 
@@ -12,6 +12,12 @@ env.useBrowserCache = true;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let transcriber: any = null;
 let currentModelName = 'onnx-community/whisper-tiny';
+
+function formatTime(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
 
 self.onmessage = async (e: MessageEvent) => {
   const { type, payload, id } = e.data;
@@ -62,7 +68,7 @@ self.onmessage = async (e: MessageEvent) => {
   }
 
   if (type === 'TRANSCRIBE_AUDIO') {
-    const { audioData, sampleRate, language = 'japanese' } = payload;
+    const { audioData, sampleRate = 16000, language = 'japanese' } = payload;
     // audioData: Float32Array (16kHz mono)
 
     if (!transcriber) {
@@ -78,29 +84,59 @@ self.onmessage = async (e: MessageEvent) => {
     }
 
     try {
-      self.postMessage({
-        type: 'STATUS',
-        status: 'transcribing',
-        message: 'ブラウザ内Whisperで音声解析・文字起こしを実行中...'
-      });
-
       const audioArray = audioData instanceof Float32Array ? audioData : new Float32Array(audioData);
+      const totalSamples = audioArray.length;
+      const totalSeconds = totalSamples / sampleRate;
 
-      // 30秒チャンク＋タイムスタンプ付きで自動分割推論
-      const result = await transcriber(audioArray, {
-        sampling_rate: sampleRate || 16000,
-        chunk_length_s: 30,
-        stride_length_s: 5,
-        return_timestamps: true,
-        language: language === 'auto' ? null : language,
-        task: 'transcribe'
-      });
+      const CHUNK_DURATION_S = 30;
+      const chunkSamples = CHUNK_DURATION_S * sampleRate;
+      const totalChunks = Math.max(1, Math.ceil(totalSamples / chunkSamples));
+
+      const collectedChunks: { timestamp: [number, number]; text: string }[] = [];
+      let fullTranscribedText = '';
+
+      for (let i = 0; i < totalChunks; i++) {
+        const startSample = i * chunkSamples;
+        const endSample = Math.min((i + 1) * chunkSamples, totalSamples);
+        const chunkAudio = audioArray.slice(startSample, endSample);
+
+        const startTime = i * CHUNK_DURATION_S;
+        const endTime = Math.min((i + 1) * CHUNK_DURATION_S, totalSeconds);
+        const timeLabel = `[${formatTime(startTime)} - ${formatTime(endTime)}]`;
+
+        self.postMessage({
+          type: 'TRANSCRIBE_PROGRESS',
+          currentChunk: i + 1,
+          totalChunks,
+          percent: Math.round(((i + 1) / totalChunks) * 100),
+          timeLabel
+        });
+
+        // 30秒ごとの推論を実行
+        const res = await transcriber(chunkAudio, {
+          sampling_rate: sampleRate,
+          language: language === 'auto' ? null : language,
+          task: 'transcribe'
+        });
+
+        const chunkText = (res.text || '').trim();
+        if (chunkText) {
+          collectedChunks.push({
+            timestamp: [startTime, endTime],
+            text: chunkText
+          });
+          fullTranscribedText += (fullTranscribedText ? '\n' : '') + `${timeLabel} ${chunkText}`;
+        }
+
+        // UIスレッドおよびメモリ回収のための小休止
+        await new Promise(r => setTimeout(r, 5));
+      }
 
       self.postMessage({
         type: 'TRANSCRIBE_SUCCESS',
         payload: {
-          text: result.text || '',
-          chunks: result.chunks || []
+          text: fullTranscribedText,
+          chunks: collectedChunks
         },
         id
       });
