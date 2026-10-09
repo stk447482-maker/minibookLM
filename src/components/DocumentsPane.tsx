@@ -30,6 +30,7 @@ interface DocumentsPaneProps {
   onRemoveAllDocs?: () => void;
   isProcessing: boolean;
   processProgress: number;
+  processStatusText?: string;
 }
 
 export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
@@ -47,7 +48,8 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
   onRemoveDoc,
   onRemoveAllDocs,
   isProcessing,
-  processProgress
+  processProgress,
+  processStatusText
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -225,8 +227,8 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
         {isProcessing ? (
           <div className="flex flex-col items-center justify-center space-y-1 py-1">
             <Loader2 className="w-5 h-5 text-indigo-400 animate-spin" />
-            <span className="text-xs text-slate-300 font-medium">
-              解析＆文字起こし中... ({processProgress}%)
+            <span className="text-xs text-slate-200 font-medium text-center truncate max-w-full px-2">
+              {processStatusText || '解析＆文字起こし中...'} ({processProgress}%)
             </span>
             <div className="w-full bg-slate-700 rounded-full h-1 overflow-hidden">
               <div

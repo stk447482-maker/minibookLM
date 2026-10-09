@@ -82,35 +82,63 @@ export function parseWavTo16kMono(buffer: ArrayBuffer): { audioData: Float32Arra
     const output = new Float32Array(totalOutputSamples);
     const sampleRatio = sampleRate / targetSampleRate;
 
-    // 16kHz モノラルへの変換 & ダウンサンプリング
-    for (let i = 0; i < totalOutputSamples; i++) {
-      const srcIndex = Math.floor(i * sampleRatio);
-      const bytePos = dataOffset + srcIndex * blockAlign;
-      if (bytePos + bytesPerSample > buffer.byteLength) break;
-
-      let sum = 0;
-      for (let ch = 0; ch < numChannels; ch++) {
-        const chPos = bytePos + ch * bytesPerSample;
-        let val = 0;
-        if (bitsPerSample === 16) {
-          val = view.getInt16(chPos, true) / 32768.0;
-        } else if (bitsPerSample === 8) {
-          val = (view.getUint8(chPos) - 128) / 128.0;
-        } else if (bitsPerSample === 24) {
-          const b0 = view.getUint8(chPos);
-          const b1 = view.getUint8(chPos + 1);
-          const b2 = view.getInt8(chPos + 2);
-          val = ((b2 << 16) | (b1 << 8) | b0) / 8388608.0;
-        } else if (bitsPerSample === 32) {
-          if (audioFormat === 3) {
-            val = view.getFloat32(chPos, true);
-          } else {
-            val = view.getInt32(chPos, true) / 2147483648.0;
-          }
+    // 16kHz モノラルへの変換 & ダウンサンプリング（16-bit PCM 専用高速パス）
+    if (bitsPerSample === 16 && dataOffset % 2 === 0) {
+      const int16 = new Int16Array(buffer, dataOffset, Math.floor(dataLength / 2));
+      const totalAvailable = int16.length;
+      if (numChannels === 1) {
+        for (let i = 0; i < totalOutputSamples; i++) {
+          const srcIndex = Math.floor(i * sampleRatio);
+          if (srcIndex >= totalAvailable) break;
+          output[i] = int16[srcIndex] / 32768.0;
         }
-        sum += val;
+      } else if (numChannels === 2) {
+        for (let i = 0; i < totalOutputSamples; i++) {
+          const srcIndex = Math.floor(i * sampleRatio) * 2;
+          if (srcIndex + 1 >= totalAvailable) break;
+          output[i] = (int16[srcIndex] + int16[srcIndex + 1]) / 65536.0;
+        }
+      } else {
+        for (let i = 0; i < totalOutputSamples; i++) {
+          const srcIndex = Math.floor(i * sampleRatio) * numChannels;
+          let sum = 0;
+          for (let ch = 0; ch < numChannels; ch++) {
+            if (srcIndex + ch < totalAvailable) sum += int16[srcIndex + ch];
+          }
+          output[i] = sum / (numChannels * 32768.0);
+        }
       }
-      output[i] = sum / numChannels;
+    } else {
+      // 汎用フォールバック (8-bit / 24-bit / 32-bit float / 奇数オフセット)
+      for (let i = 0; i < totalOutputSamples; i++) {
+        const srcIndex = Math.floor(i * sampleRatio);
+        const bytePos = dataOffset + srcIndex * blockAlign;
+        if (bytePos + bytesPerSample > buffer.byteLength) break;
+
+        let sum = 0;
+        for (let ch = 0; ch < numChannels; ch++) {
+          const chPos = bytePos + ch * bytesPerSample;
+          let val = 0;
+          if (bitsPerSample === 16) {
+            val = view.getInt16(chPos, true) / 32768.0;
+          } else if (bitsPerSample === 8) {
+            val = (view.getUint8(chPos) - 128) / 128.0;
+          } else if (bitsPerSample === 24) {
+            const b0 = view.getUint8(chPos);
+            const b1 = view.getUint8(chPos + 1);
+            const b2 = view.getInt8(chPos + 2);
+            val = ((b2 << 16) | (b1 << 8) | b0) / 8388608.0;
+          } else if (bitsPerSample === 32) {
+            if (audioFormat === 3) {
+              val = view.getFloat32(chPos, true);
+            } else {
+              val = view.getInt32(chPos, true) / 2147483648.0;
+            }
+          }
+          sum += val;
+        }
+        output[i] = sum / numChannels;
+      }
     }
 
     return { audioData: output, durationSec };

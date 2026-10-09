@@ -19,51 +19,68 @@ function formatTime(seconds: number): string {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
+async function ensureTranscriber(modelName: string = currentModelName) {
+  if (transcriber && currentModelName === modelName) return transcriber;
+
+  self.postMessage({
+    type: 'STATUS',
+    status: 'loading_model',
+    message: `音声認識モデル (${modelName}) を初期化中...`
+  });
+
+  try {
+    transcriber = await pipeline('automatic-speech-recognition', modelName, {
+      dtype: {
+        encoder_model: 'fp32',
+        decoder_model_merged: 'q4'
+      },
+      device: 'wasm',
+      progress_callback: (progress: { status: string; progress?: number; file?: string }) => {
+        if (progress.status === 'progress' && progress.progress !== undefined) {
+          self.postMessage({
+            type: 'DOWNLOAD_PROGRESS',
+            file: progress.file,
+            percent: Math.round(progress.progress)
+          });
+        }
+      }
+    });
+    currentModelName = modelName;
+    return transcriber;
+  } catch (err: unknown) {
+    // フォールバック: 標準構成でリトライ
+    try {
+      transcriber = await pipeline('automatic-speech-recognition', modelName, {
+        device: 'wasm',
+        progress_callback: (progress: { status: string; progress?: number; file?: string }) => {
+          if (progress.status === 'progress' && progress.progress !== undefined) {
+            self.postMessage({
+              type: 'DOWNLOAD_PROGRESS',
+              file: progress.file,
+              percent: Math.round(progress.progress)
+            });
+          }
+        }
+      });
+      currentModelName = modelName;
+      return transcriber;
+    } catch (fallbackErr: unknown) {
+      const msg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+      throw new Error(`音声認識モデル初期化エラー: ${msg}`);
+    }
+  }
+}
+
 self.onmessage = async (e: MessageEvent) => {
   const { type, payload, id } = e.data;
 
   if (type === 'INIT_MODEL') {
     const modelName = payload?.modelName || currentModelName;
     try {
-      if (!transcriber || currentModelName !== modelName) {
-        self.postMessage({
-          type: 'STATUS',
-          status: 'loading_model',
-          message: `音声認識モデル (${modelName}) を初期化中...`
-        });
-
-        // WebGPUを優先し、非対応時は自動でWASM/CPUで実行
-        transcriber = await pipeline('automatic-speech-recognition', modelName, {
-          dtype: {
-            encoder_model: 'fp32',
-            decoder_model_merged: 'q4'
-          },
-          device: 'wasm',
-          progress_callback: (progress: { status: string; progress?: number; file?: string }) => {
-            if (progress.status === 'progress' && progress.progress !== undefined) {
-              self.postMessage({
-                type: 'DOWNLOAD_PROGRESS',
-                file: progress.file,
-                percent: Math.round(progress.progress)
-              });
-            }
-          }
-        });
-        currentModelName = modelName;
-      }
+      await ensureTranscriber(modelName);
       self.postMessage({ type: 'INIT_SUCCESS', id });
-    } catch (err: unknown) {
-      // フォールバック: 標準dtypeでリトライ
-      try {
-        transcriber = await pipeline('automatic-speech-recognition', modelName, {
-          device: 'wasm'
-        });
-        currentModelName = modelName;
-        self.postMessage({ type: 'INIT_SUCCESS', id });
-      } catch (fallbackErr: unknown) {
-        const msg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
-        self.postMessage({ type: 'ERROR', message: `音声認識モデル初期化エラー: ${msg}`, id });
-      }
+    } catch (err: any) {
+      self.postMessage({ type: 'ERROR', message: err.message, id });
     }
   }
 
@@ -73,12 +90,10 @@ self.onmessage = async (e: MessageEvent) => {
 
     if (!transcriber) {
       try {
-        transcriber = await pipeline('automatic-speech-recognition', currentModelName, {
-          device: 'wasm'
-        });
+        await ensureTranscriber(currentModelName);
       } catch (initErr: unknown) {
         const msg = initErr instanceof Error ? initErr.message : String(initErr);
-        self.postMessage({ type: 'ERROR', message: `音声モデルが未準備です: ${msg}`, id });
+        self.postMessage({ type: 'ERROR', message: `音声モデル初期化失敗: ${msg}`, id });
         return;
       }
     }

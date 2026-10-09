@@ -248,7 +248,7 @@ class RAGManager {
             sampleRate: 16000,
             language: 'japanese'
           }
-        });
+        }, [audioData.buffer]);
       });
 
       onProgress?.('文字起こし完了！ドキュメント登録中...', 98);
@@ -291,7 +291,7 @@ class RAGManager {
   public async processDocument(
     file: File,
     projectId: string,
-    onProgress?: (percent: number) => void
+    onProgress?: (percent: number, status?: string) => void
   ): Promise<{ doc: DocumentSource; chunks: DocumentChunk[] }> {
     let content = '';
     let docType: 'pdf' | 'text' | 'markdown' | 'audio' | 'video' = 'text';
@@ -302,15 +302,19 @@ class RAGManager {
       content = await this.parsePdf(file);
     } else if (ext.endsWith('.mp3') || ext.endsWith('.wav') || ext.endsWith('.wma') || ext.endsWith('.m4a') || ext.endsWith('.ogg')) {
       docType = 'audio';
-      content = await this.parseAudioOrVideo(file, (_, p) => p && onProgress?.(p));
+      content = await this.parseAudioOrVideo(file, (status, p) => {
+        if (p !== undefined) onProgress?.(p, status);
+      });
     } else if (ext.endsWith('.mp4') || ext.endsWith('.webm') || ext.endsWith('.mov') || ext.endsWith('.mkv')) {
       docType = 'video';
-      content = await this.parseAudioOrVideo(file, (_, p) => p && onProgress?.(p));
+      content = await this.parseAudioOrVideo(file, (status, p) => {
+        if (p !== undefined) onProgress?.(p, status);
+      });
     } else {
       content = await file.text();
     }
 
-    return this.processTextContent(file.name, content, projectId, docType, onProgress);
+    return this.processTextContent(file.name, content, projectId, docType, (p) => onProgress?.(p, 'ベクトル検索インデックス作成中...'));
   }
 
 

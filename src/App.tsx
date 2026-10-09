@@ -56,6 +56,7 @@ export const App: React.FC = () => {
   const [documents, setDocuments] = useState<DocumentSource[]>([]);
   const [isProcessingDoc, setIsProcessingDoc] = useState(false);
   const [docProgress, setDocProgress] = useState(0);
+  const [docStatusText, setDocStatusText] = useState('');
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -187,13 +188,22 @@ export const App: React.FC = () => {
 
     setIsProcessingDoc(true);
     setDocProgress(0);
+    setDocStatusText('ファイルを解析中...');
 
     try {
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         try {
-          const { doc, chunks } = await ragManager.processDocument(file, activeProject.id, (percent) => {
+          // 同名ドキュメントが既に存在する場合は旧ドキュメント（旧メタデータや古い内容）を自動削除して置換
+          const existingSameName = documents.find(d => d.title === file.name && d.projectId === activeProject.id);
+          if (existingSameName) {
+            await dbService.deleteDocument(existingSameName.id);
+            setDocuments(prev => prev.filter(d => d.id !== existingSameName.id));
+          }
+
+          const { doc, chunks } = await ragManager.processDocument(file, activeProject.id, (percent, status) => {
             setDocProgress(percent);
+            if (status) setDocStatusText(status);
           });
 
           await dbService.saveDocument(doc);
@@ -215,6 +225,7 @@ export const App: React.FC = () => {
     } finally {
       setIsProcessingDoc(false);
       setDocProgress(0);
+      setDocStatusText('');
     }
   };
 
@@ -881,6 +892,7 @@ ${fullContext}`;
             onRemoveAllDocs={handleRemoveAllDocs}
             isProcessing={isProcessingDoc}
             processProgress={docProgress}
+            processStatusText={docStatusText}
           />
         </div>
 
