@@ -11,7 +11,8 @@ import {
   Square,
   DownloadCloud,
   UploadCloud,
-  Mic
+  Mic,
+  Eye
 } from 'lucide-react';
 import { DocumentSource, Project } from '../types/index.ts';
 
@@ -29,6 +30,7 @@ interface DocumentsPaneProps {
   onToggleAllDocs: (selectAll: boolean) => void;
   onRemoveDoc: (id: string) => void;
   onRemoveAllDocs?: () => void;
+  onViewDoc?: (doc: DocumentSource) => void;
   isProcessing: boolean;
   processProgress: number;
   processStatusText?: string;
@@ -51,6 +53,7 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
   onToggleAllDocs,
   onRemoveDoc,
   onRemoveAllDocs,
+  onViewDoc,
   isProcessing,
   processProgress,
   processStatusText,
@@ -329,8 +332,11 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
                   <FileText className="w-3.5 h-3.5" />
                 </div>
 
-                <div className="min-w-0 flex-1 cursor-pointer" onClick={() => onToggleDoc(doc.id)}>
-                  <h3 className="text-xs font-semibold text-slate-200 truncate" title={doc.title}>
+                <div
+                  className="min-w-0 flex-1 cursor-pointer"
+                  onClick={() => onViewDoc ? onViewDoc(doc) : onToggleDoc(doc.id)}
+                >
+                  <h3 className="text-xs font-semibold text-slate-200 hover:text-indigo-300 transition-colors truncate" title={`${doc.title} (クリックで全文表示・編集・AI校正)`}>
                     {doc.title}
                   </h3>
                   <div className="flex items-center space-x-2 text-[10px] text-slate-400 mt-0.5">
@@ -354,16 +360,31 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
                 </div>
               </div>
 
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRemoveDoc(doc.id);
-                }}
-                className="p-1.5 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 rounded-lg transition-all ml-1 shrink-0"
-                title="このドキュメントを削除"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
+              <div className="flex items-center space-x-0.5 ml-1 shrink-0">
+                {onViewDoc && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onViewDoc(doc);
+                    }}
+                    className="p-1.5 hover:bg-indigo-500/20 text-slate-400 hover:text-indigo-300 rounded-lg transition-all"
+                    title="文字起こし全文の表示・編集・AI校正"
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                  </button>
+                )}
+
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRemoveDoc(doc.id);
+                  }}
+                  className="p-1.5 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 rounded-lg transition-all"
+                  title="このドキュメントを削除"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
           ))
         )}

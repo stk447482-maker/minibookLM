@@ -398,10 +398,11 @@ class RAGManager {
     content: string,
     projectId: string,
     type: 'pdf' | 'text' | 'markdown' | 'web' | 'audio' | 'video' = 'markdown',
-    onProgress?: (percent: number) => void
+    onProgress?: (percent: number) => void,
+    targetDocId?: string
   ): Promise<{ doc: DocumentSource; chunks: DocumentChunk[] }> {
 
-    const docId = `doc_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const docId = targetDocId || `doc_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const hierarchicalChunks = this.createHierarchicalChunks(content, docId, title, projectId);
 
     const docSource: DocumentSource = {

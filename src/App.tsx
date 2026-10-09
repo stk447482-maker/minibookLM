@@ -4,6 +4,7 @@ import { DocumentsPane } from './components/DocumentsPane.tsx';
 import { ChatPane } from './components/ChatPane.tsx';
 import { StudioPane } from './components/StudioPane.tsx';
 import { SettingsModal } from './components/SettingsModal.tsx';
+import { DocumentModal } from './components/DocumentModal.tsx';
 import { AuthGate } from './components/AuthGate.tsx';
 import { DocumentSource, ChatMessage, StudioArtifact, StudioTab, ModelConfig, Project, SourceReference } from './types/index.ts';
 import { ragManager } from './services/ragManager.ts';
@@ -54,6 +55,7 @@ export const App: React.FC = () => {
   const [activeProject, setActiveProject] = useState<Project | null>(null);
 
   const [documents, setDocuments] = useState<DocumentSource[]>([]);
+  const [selectedDocForModal, setSelectedDocForModal] = useState<DocumentSource | null>(null);
   const [isProcessingDoc, setIsProcessingDoc] = useState(false);
   const [docProgress, setDocProgress] = useState(0);
   const [docStatusText, setDocStatusText] = useState('');
@@ -318,6 +320,38 @@ export const App: React.FC = () => {
     }
     setDocuments([]);
     await ragManager.loadProjectChunks([]);
+  };
+
+  // ドキュメント内容の直接編集・AI校正後の保存＆再インデックス
+  const handleSaveDocumentContent = async (doc: DocumentSource, newContent: string) => {
+    if (!activeProject) return;
+
+    // 1. 旧ドキュメントのチャンクを削除
+    await dbService.deleteDocument(doc.id);
+
+    // 2. 新しい内容で階層チャンク分割＆埋め込みベクトル再計算
+    const { doc: updatedDoc, chunks: newChunks } = await ragManager.processTextContent(
+      doc.title,
+      newContent,
+      doc.projectId,
+      doc.type,
+      undefined,
+      doc.id
+    );
+
+    // 3. IndexedDBに保存
+    await dbService.saveDocument(updatedDoc);
+    await dbService.saveChunks(newChunks);
+
+    // 4. ステート同期
+    setDocuments(prev => prev.map(d => d.id === doc.id ? updatedDoc : d));
+    setSelectedDocForModal(updatedDoc);
+
+    // 5. 検索ワーカーのインデックスを再同期
+    const allChunks = await dbService.getChunksByProject(activeProject.id);
+    await ragManager.loadProjectChunks(allChunks);
+
+    alert(`「${doc.title}」を正常に更新し、検索インデックスを再構築しました！`);
   };
 
   // チャットメッセージ個別削除
@@ -919,6 +953,7 @@ ${fullContext}`;
             onToggleAllDocs={handleToggleAllDocs}
             onRemoveDoc={handleRemoveDoc}
             onRemoveAllDocs={handleRemoveAllDocs}
+            onViewDoc={(doc) => setSelectedDocForModal(doc)}
             isProcessing={isProcessingDoc}
             processProgress={docProgress}
             processStatusText={docStatusText}
@@ -965,6 +1000,15 @@ ${fullContext}`;
           />
         </div>
       </main>
+
+      {/* ドキュメント詳細・文字起こし閲覧・編集・AI校正モーダル */}
+      <DocumentModal
+        document={selectedDocForModal}
+        config={config}
+        isOpen={!!selectedDocForModal}
+        onClose={() => setSelectedDocForModal(null)}
+        onSaveDocumentContent={handleSaveDocumentContent}
+      />
 
       <SettingsModal
         isOpen={isSettingsOpen}

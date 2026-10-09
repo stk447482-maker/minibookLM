@@ -171,6 +171,20 @@ class IndexedDBManager {
     });
   }
 
+  public async getChunksByDocId(docId: string): Promise<DocumentChunk[]> {
+    const db = await this.getDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('chunks', 'readonly');
+      const index = tx.objectStore('chunks').index('docId');
+      const req = index.getAll(docId);
+      req.onsuccess = () => {
+        const sorted = (req.result || []).sort((a, b) => a.chunkIndex - b.chunkIndex);
+        resolve(sorted);
+      };
+      req.onerror = () => reject(req.error);
+    });
+  }
+
   public async saveChunks(chunks: DocumentChunk[]): Promise<void> {
     const db = await this.getDB();
     return new Promise((resolve, reject) => {
