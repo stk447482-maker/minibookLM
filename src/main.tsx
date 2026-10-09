@@ -5,6 +5,16 @@ import './index.css';
 import { registerSW } from 'virtual:pwa-register';
 
 // PWA Service Worker 自動更新＆即時キャッシュ置換
+if ('serviceWorker' in navigator) {
+  let refreshing = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!refreshing) {
+      refreshing = true;
+      window.location.reload();
+    }
+  });
+}
+
 const updateSW = registerSW({
   immediate: true,
   onNeedRefresh() {

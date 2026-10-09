@@ -345,6 +345,12 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
                       {doc.type === 'audio' ? '🎙️ 音声' : doc.type.toUpperCase()}
                     </span>
                   </div>
+                  {doc.contentPreview?.includes('音声トラックがドキュメントとして登録されました') && (
+                    <div className="mt-1 bg-amber-500/15 border border-amber-500/40 rounded px-2 py-1 text-[10px] text-amber-200">
+                      ⚠️ <strong className="font-bold">旧バージョンの未文字起こしデータです</strong><br />
+                      音声ファイルを再度ドラッグ＆ドロップするとKotoba-Whisperで自動解析されます。
+                    </div>
+                  )}
                 </div>
               </div>
 
