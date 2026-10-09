@@ -268,6 +268,18 @@ export const App: React.FC = () => {
     await ragManager.loadProjectChunks(remainingChunks);
   };
 
+  // ドキュメント全削除＆インデックス完全初期化
+  const handleRemoveAllDocs = async () => {
+    if (!activeProject || documents.length === 0) return;
+    if (!confirm(`プロジェクト「${activeProject.name}」の全ドキュメント（${documents.length}件）を完全に消去しますか？`)) return;
+    
+    for (const d of documents) {
+      await dbService.deleteDocument(d.id);
+    }
+    setDocuments([]);
+    await ragManager.loadProjectChunks([]);
+  };
+
   // チャットメッセージ個別削除
   const handleDeleteMessage = async (msgId: string) => {
     await dbService.deleteMessage(msgId);
@@ -866,6 +878,7 @@ ${fullContext}`;
             onToggleDoc={handleToggleDoc}
             onToggleAllDocs={handleToggleAllDocs}
             onRemoveDoc={handleRemoveDoc}
+            onRemoveAllDocs={handleRemoveAllDocs}
             isProcessing={isProcessingDoc}
             processProgress={docProgress}
           />

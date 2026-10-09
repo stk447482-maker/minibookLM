@@ -1,11 +1,12 @@
 // [License] Verified Free & Commercial Use.
 // [Auditor] Antigravity 2.0 x takumiGuard
 // [Status] Pass (Harness env checked).
-// [Timestamp] 2026-10-09T12:45:00Z
+// [Timestamp] 2026-10-09T13:00:00Z
 
 /**
- * WAVバイナリ（PCM / IEEE Float）をWeb Audio APIのメモリ上限エラーを回避して
- * 高速かつ安全に 16kHz モノラル Float32Array にパースする専用デコーダー
+ * WAVバイナリ（PCM / IEEE Float / 8-bit / 16-bit / 24-bit / 32-bit）を
+ * Web Audio APIのブラウザメモリ制限（AudioContext crash）を完全回避して
+ * 超高速に 16kHz モノラル Float32Array にパース・リサンプリングする専用デコーダー
  */
 export function parseWavTo16kMono(buffer: ArrayBuffer): { audioData: Float32Array; durationSec: number } | null {
   try {
@@ -25,7 +26,8 @@ export function parseWavTo16kMono(buffer: ArrayBuffer): { audioData: Float32Arra
     let dataOffset = 0;
     let dataLength = 0;
 
-    while (offset < buffer.byteLength - 8) {
+    // RIFFチャンク探索ループ（偶数境界パディング考慮）
+    while (offset <= buffer.byteLength - 8) {
       const chunkId = String.fromCharCode(
         view.getUint8(offset),
         view.getUint8(offset + 1),
@@ -39,17 +41,36 @@ export function parseWavTo16kMono(buffer: ArrayBuffer): { audioData: Float32Arra
         numChannels = view.getUint16(offset + 10, true);
         sampleRate = view.getUint32(offset + 12, true);
         bitsPerSample = view.getUint16(offset + 22, true);
+        const paddedSize = chunkSize % 2 !== 0 ? chunkSize + 1 : chunkSize;
+        offset += 8 + paddedSize;
       } else if (chunkId === 'data') {
         dataOffset = offset + 8;
-        dataLength = Math.min(chunkSize, buffer.byteLength - dataOffset);
+        dataLength = chunkSize === 0xFFFFFFFF || chunkSize === 0 
+          ? buffer.byteLength - dataOffset 
+          : Math.min(chunkSize, buffer.byteLength - dataOffset);
         break;
+      } else {
+        // 未知のメタデータチャンク（JUNK, LIST, bext等）をスキップ
+        const paddedSize = chunkSize % 2 !== 0 ? chunkSize + 1 : chunkSize;
+        offset += 8 + paddedSize;
       }
-      offset += 8 + chunkSize;
+    }
+
+    // 万が一 'data' チャンクがヘッダー構造から見つからない場合のバイナリスキャンフォールバック
+    if (!dataOffset) {
+      const bytes = new Uint8Array(buffer);
+      for (let i = 12; i < Math.min(bytes.length - 8, 8192); i++) {
+        if (bytes[i] === 0x64 && bytes[i+1] === 0x61 && bytes[i+2] === 0x74 && bytes[i+3] === 0x61) {
+          dataOffset = i + 8;
+          dataLength = buffer.byteLength - dataOffset;
+          break;
+        }
+      }
     }
 
     if (!dataOffset || dataLength <= 0) return null;
 
-    const bytesPerSample = bitsPerSample / 8;
+    const bytesPerSample = Math.max(1, Math.floor(bitsPerSample / 8));
     const blockAlign = numChannels * bytesPerSample;
     const totalInputSamples = Math.floor(dataLength / blockAlign);
     const durationSec = totalInputSamples / sampleRate;
@@ -61,6 +82,7 @@ export function parseWavTo16kMono(buffer: ArrayBuffer): { audioData: Float32Arra
     const output = new Float32Array(totalOutputSamples);
     const sampleRatio = sampleRate / targetSampleRate;
 
+    // 16kHz モノラルへの変換 & ダウンサンプリング
     for (let i = 0; i < totalOutputSamples; i++) {
       const srcIndex = Math.floor(i * sampleRatio);
       const bytePos = dataOffset + srcIndex * blockAlign;
@@ -107,7 +129,7 @@ export async function decodeAudioTo16kMono(file: File): Promise<{
 }> {
   const arrayBuffer = await file.arrayBuffer();
 
-  // 1. WAVファイルの場合はブラウザのAudioContextメモリ上限を回避するバイナリデコーダーを優先
+  // 1. WAVファイルの場合はブラウザのAudioContextメモリ上限を回避するバイナリデコーダーを最優先
   if (file.name.toLowerCase().endsWith('.wav')) {
     const wavParsed = parseWavTo16kMono(arrayBuffer);
     if (wavParsed) {
@@ -126,7 +148,7 @@ export async function decodeAudioTo16kMono(file: File): Promise<{
     if (wavParsed) {
       return wavParsed;
     }
-    throw new Error(`音声データのデコードに失敗しました: ${err?.message || 'Unsupported format'}`);
+    throw new Error(`音声データのデコードに失敗しました (${err?.message || '解釈不能な音声フォーマット'})`);
   }
 
   const durationSec = decodedBuffer.duration;

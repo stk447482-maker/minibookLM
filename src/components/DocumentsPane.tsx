@@ -27,6 +27,7 @@ interface DocumentsPaneProps {
   onToggleDoc: (id: string) => void;
   onToggleAllDocs: (selectAll: boolean) => void;
   onRemoveDoc: (id: string) => void;
+  onRemoveAllDocs?: () => void;
   isProcessing: boolean;
   processProgress: number;
 }
@@ -44,6 +45,7 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
   onToggleDoc,
   onToggleAllDocs,
   onRemoveDoc,
+  onRemoveAllDocs,
   isProcessing,
   processProgress
 }) => {
@@ -170,18 +172,31 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
 
       {/* ソース操作バー */}
       <div className="flex items-center justify-between mb-3 px-1">
-        <button
-          onClick={() => onToggleAllDocs(!isAllSelected)}
-          disabled={documents.length === 0}
-          className="flex items-center space-x-1.5 text-xs text-slate-300 hover:text-white font-medium disabled:opacity-40"
-        >
-          {isAllSelected ? (
-            <CheckSquare className="w-4 h-4 text-indigo-400" />
-          ) : (
-            <Square className="w-4 h-4 text-slate-500" />
+        <div className="flex items-center space-x-2">
+          <button
+            onClick={() => onToggleAllDocs(!isAllSelected)}
+            disabled={documents.length === 0}
+            className="flex items-center space-x-1 text-xs text-slate-300 hover:text-white font-medium disabled:opacity-40"
+          >
+            {isAllSelected ? (
+              <CheckSquare className="w-4 h-4 text-indigo-400" />
+            ) : (
+              <Square className="w-4 h-4 text-slate-500" />
+            )}
+            <span>全て選択</span>
+          </button>
+
+          {documents.length > 0 && onRemoveAllDocs && (
+            <button
+              onClick={onRemoveAllDocs}
+              className="text-[10px] text-rose-400/80 hover:text-rose-300 hover:underline flex items-center space-x-0.5 ml-1"
+              title="ドキュメント全削除＆検索キャッシュ初期化"
+            >
+              <Trash2 className="w-2.5 h-2.5" />
+              <span>全消去</span>
+            </button>
           )}
-          <span>全て選択</span>
-        </button>
+        </div>
 
         <span className="text-[11px] text-slate-400 font-mono">
           <span className="text-indigo-400 font-semibold">{enabledCount}</span> / {documents.length} 件 選択中
