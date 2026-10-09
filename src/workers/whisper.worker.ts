@@ -50,14 +50,21 @@ async function ensureTranscriber(modelName: string = currentModelName) {
     }
   };
 
-  // 1. WebGPU が利用可能な場合は優先試行（5〜8倍高速）
+  const isKotoba = modelName.includes('kotoba') || modelName.includes('large');
+
+  // 1. WebGPU が利用可能な場合は優先試行（5〜8倍高速・fp16/q4f16）
   if (typeof navigator !== 'undefined' && 'gpu' in navigator) {
     try {
       transcriber = await pipeline('automatic-speech-recognition', modelName, {
-        dtype: {
-          encoder_model: 'fp32',
-          decoder_model_merged: 'q4'
-        },
+        dtype: isKotoba
+          ? {
+              encoder_model: 'fp16',
+              decoder_model_merged: 'q4f16'
+            }
+          : {
+              encoder_model: 'fp32',
+              decoder_model_merged: 'q4'
+            },
         device: 'webgpu',
         progress_callback: progressCallback
       });
@@ -68,30 +75,54 @@ async function ensureTranscriber(modelName: string = currentModelName) {
     }
   }
 
-  // 2. WASM フォールバック
+  // 2. WASM フォールバック (CPU)
   try {
     transcriber = await pipeline('automatic-speech-recognition', modelName, {
-      dtype: {
-        encoder_model: 'fp32',
-        decoder_model_merged: 'q4'
-      },
+      dtype: isKotoba
+        ? {
+            encoder_model: 'fp16',
+            decoder_model_merged: 'q4'
+          }
+        : {
+            encoder_model: 'fp32',
+            decoder_model_merged: 'q4'
+          },
       device: 'wasm',
       progress_callback: progressCallback
     });
     currentModelName = modelName;
     return transcriber;
   } catch (err: unknown) {
-    try {
-      transcriber = await pipeline('automatic-speech-recognition', modelName, {
-        device: 'wasm',
-        progress_callback: progressCallback
+    console.warn(`モデル ${modelName} の初期化に失敗しました。軽量安定モデルへ自動フォールバック:`, err);
+
+    // Kotoba-Whisper等の大容量モデルでブラウザメモリ制限やMountedFilesエラーが発生した場合、
+    // 確実に動作する whisper-tiny (39MB) へ自動切替して文字起こしを継続
+    if (modelName !== 'onnx-community/whisper-tiny') {
+      self.postMessage({
+        type: 'STATUS',
+        status: 'fallback',
+        message: `${modelName} の端末メモリ制約のため、軽量安定モデル (whisper-tiny) へ自動切替中...`
       });
-      currentModelName = modelName;
-      return transcriber;
-    } catch (fallbackErr: unknown) {
-      const msg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
-      throw new Error(`音声認識モデル初期化エラー: ${msg}`);
+
+      try {
+        transcriber = await pipeline('automatic-speech-recognition', 'onnx-community/whisper-tiny', {
+          device: (typeof navigator !== 'undefined' && 'gpu' in navigator) ? 'webgpu' : 'wasm',
+          dtype: {
+            encoder_model: 'fp32',
+            decoder_model_merged: 'q4'
+          },
+          progress_callback: progressCallback
+        });
+        currentModelName = 'onnx-community/whisper-tiny';
+        return transcriber;
+      } catch (fallbackErr: unknown) {
+        const msg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+        throw new Error(`音声認識モデル初期化エラー (フォールバック含む): ${msg}`);
+      }
     }
+
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`音声認識モデル初期化エラー: ${msg}`);
   }
 }
 

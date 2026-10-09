@@ -291,12 +291,12 @@ class RAGManager {
         chunks: { timestamp: [number, number | null]; text: string }[];
       }>((resolve, reject) => {
         const handler = (e: MessageEvent) => {
-          const { type, payload, message, percent, status, currentChunk, totalChunks, timeLabel } = e.data;
+          const { type, payload, message, percent, currentChunk, totalChunks, timeLabel } = e.data;
 
           if (type === 'DOWNLOAD_PROGRESS' && percent !== undefined) {
             onProgress?.(`モデル読込中 (${percent}%)`, 30 + Math.round(percent * 0.2));
-          } else if (type === 'STATUS' && status === 'transcribing') {
-            onProgress?.(`${engineLabel} 推論実行中...`, 50);
+          } else if (type === 'STATUS') {
+            onProgress?.(message || `${engineLabel} 準備中...`, 45);
           } else if (type === 'TRANSCRIBE_PROGRESS') {
             onProgress?.(`文字起こし中: ${timeLabel || ''} (${currentChunk}/${totalChunks})`, 50 + Math.round(percent * 0.45));
           } else if (type === 'TRANSCRIBE_SUCCESS') {
@@ -309,6 +309,7 @@ class RAGManager {
         };
 
         this.whisperWorker!.addEventListener('message', handler);
+        const bufferCopy = audioData.slice(0).buffer;
         this.whisperWorker!.postMessage({
           type: 'TRANSCRIBE_AUDIO',
           payload: {
@@ -317,7 +318,7 @@ class RAGManager {
             language: 'japanese',
             modelName: localModelName
           }
-        }, [audioData.buffer]);
+        }, [bufferCopy]);
       });
 
       onProgress?.('文字起こし完了！ドキュメント登録中...', 98);
