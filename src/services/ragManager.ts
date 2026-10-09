@@ -283,8 +283,8 @@ class RAGManager {
       onProgress?.('完了', 100);
       return transcribedText;
     } catch (e: any) {
-      console.warn('Whisper transcription failed, fallback to audio metadata:', e);
-      return `## 🎙️ 音声/動画データ (${file.name})\n- サイズ: ${Math.round(file.size / 1024)} KB\n- 種別: ${file.type || 'audio/video'}\n\n【注意】音声文字起こし処理中にエラーが発生しました (${e?.message || e})。音声メタデータのみ登録されています。`;
+      console.error('Whisper transcription failed:', e);
+      throw new Error(`音声文字起こし処理に失敗しました: ${e?.message || e}`);
     }
   }
 
