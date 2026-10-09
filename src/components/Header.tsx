@@ -27,10 +27,10 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
         <div>
           <h1 className="text-base font-bold text-slate-100 flex items-center gap-2">
-            MiniBookLM <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">PWA Ultra</span>
+            MiniBookLM <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">PWA v2.1 (Whisper STT)</span>
           </h1>
           <p className="text-xs text-slate-400 hidden sm:block">
-            In-Browser Hybrid RAG & AI Studio
+            In-Browser Hybrid RAG & AI Studio (Local Audio Transcription)
           </p>
         </div>
       </div>
