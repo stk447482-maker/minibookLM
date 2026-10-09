@@ -19,16 +19,79 @@ function formatTime(seconds: number): string {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
-// 🎯 VAD (Voice Activity Detection) - 高速RMS音量エネルギー計算
-function computeRmsEnergy(samples: Float32Array): number {
-  if (!samples || samples.length === 0) return 0;
-  let sumSquares = 0;
-  const step = 4;
-  const count = Math.floor(samples.length / step);
-  for (let i = 0; i < samples.length; i += step) {
-    sumSquares += samples[i] * samples[i];
+// 🎯 VAD (Voice Activity Detection) - サブフレーム分割エネルギー判定
+function isSpeechActive(samples: Float32Array, sampleRate: number = 16000): boolean {
+  if (!samples || samples.length === 0) return false;
+  
+  const frameLength = Math.floor(sampleRate * 0.5); // 0.5秒フレーム (8000サンプル)
+  const totalFrames = Math.floor(samples.length / frameLength);
+  if (totalFrames === 0) return false;
+
+  let activeFrameCount = 0;
+  let totalEnergy = 0;
+
+  for (let f = 0; f < totalFrames; f++) {
+    const start = f * frameLength;
+    const end = Math.min(start + frameLength, samples.length);
+    let sumSq = 0;
+    let peak = 0;
+
+    for (let i = start; i < end; i += 4) {
+      const absVal = Math.abs(samples[i]);
+      if (absVal > peak) peak = absVal;
+      sumSq += samples[i] * samples[i];
+    }
+    const frameRms = Math.sqrt(sumSq / ((end - start) / 4));
+    totalEnergy += frameRms;
+
+    // 0.5秒区間内で音声レベルの音量とピークがあるか判定
+    if (frameRms > 0.0055 && peak > 0.018) {
+      activeFrameCount++;
+    }
   }
-  return Math.sqrt(sumSquares / Math.max(1, count));
+
+  const avgRms = totalEnergy / totalFrames;
+  // 30秒中で少なくとも1秒分（2フレーム以上）の明瞭な発話があり、平均RMSが閾値を超えていること
+  return activeFrameCount >= 2 && avgRms >= 0.0038;
+}
+
+// 🛡️ Whisper特有の定型幻覚・ループ・時間ごとの同一文字列リピート（ハレーション）検知・除去
+const KNOWN_HALLUCINATIONS = [
+  /^(ご視聴ありがとうございました|ご視聴いただきありがとうございました|ご清聴ありがとうございました|最後までご視聴.*|ご覧いただきありがとうございました)[。！!？? ]*$/i,
+  /^(チャンネル登録.*|お疲れ様でした|おやすみなさい|バイバイ|それではまた|またね)[。！!？? ]*$/i,
+  /^(Thank you.*|Subtitles by.*|MBC.*|MBC 뉴스.*|視聴者.*)[。！!？? ]*$/i,
+  /^[♪\s\-—_~～・.。:：;；,，]+$/
+];
+
+function cleanWhisperText(rawText: string, recentTexts: string[]): string | null {
+  let text = (rawText || '').trim();
+  if (!text || text.length < 2) return null;
+
+  // 1. 記号・定型ハルシネーションの即時破棄
+  for (const regex of KNOWN_HALLUCINATIONS) {
+    if (regex.test(text)) return null;
+  }
+
+  // 2. チャンク内での同一フレーズ連続ループ（あいうえお。あいうえお。あいうえお。）の縮約
+  text = text.replace(/([^\n]{3,35}?)(?:[。、\s]*\1){2,}/gu, '$1');
+
+  // 3. 直近チャンク（過去3回）との同一・類似文字列のハルシネーション連鎖判定
+  if (recentTexts.length > 0) {
+    const last1 = recentTexts[recentTexts.length - 1];
+    const last2 = recentTexts.length >= 2 ? recentTexts[recentTexts.length - 2] : '';
+
+    // 直前と完全に同一テキスト、または2連続で同一の短文（40文字以下）はWhisperのフリーズ幻覚として破棄
+    if (text === last1 || (text === last2 && text.length < 40)) {
+      return null;
+    }
+
+    // 高度な部分一致判定（直前と80%以上重複する短文ループを抑制）
+    if (text.length < 50 && (last1.includes(text) || text.includes(last1))) {
+      return null;
+    }
+  }
+
+  return text;
 }
 
 async function ensureTranscriber(modelName: string = currentModelName) {
@@ -183,43 +246,58 @@ self.onmessage = async (e: MessageEvent) => {
           timeLabel
         });
 
-        // 🎯 VAD判定: 無音・微小ノイズ区間は推論スキップして高速化＆定型幻覚防止
-        const rms = computeRmsEnergy(chunkAudio);
-        if (rms < 0.0035) {
-          // 無音区間はスキップ
+        // 🎯 1. 高精度VAD判定: 無音・微小ノイズ・BGMのみ区間は推論スキップして定型幻覚を防止
+        if (!isSpeechActive(chunkAudio, sampleRate)) {
           continue;
         }
 
-        // 30秒ごとの推論を実行
+        // 🎯 2. 30秒ごとの推論を実行（repetition_penalty & no_repeat_ngram_size でループ抑制）
         const res = await transcriber(chunkAudio, {
           sampling_rate: sampleRate,
           language: language === 'auto' ? null : language,
-          task: 'transcribe'
+          task: 'transcribe',
+          temperature: 0.0,
+          repetition_penalty: 1.25,
+          no_repeat_ngram_size: 3
         });
 
-        let chunkText = (res.text || '').trim();
-        // Whisper特有の無音ハルシネーション定型句の除去
-        if (chunkText === 'ご視聴ありがとうございました' || chunkText === 'ご視聴ありがとうございました。' || chunkText === 'チャンネル登録お願いします。' || chunkText === 'Thank you.') {
-          chunkText = '';
-        }
+        // 🎯 3. ハルシネーション・時間ごとの同一文字列リピート検知＆除去
+        const recentTexts = collectedChunks.slice(-5).map(c => c.text);
+        const validText = cleanWhisperText(res?.text, recentTexts);
 
-        if (chunkText) {
+        if (validText) {
           collectedChunks.push({
             timestamp: [startTime, endTime],
-            text: chunkText
+            text: validText
           });
-          fullTranscribedText += (fullTranscribedText ? '\n' : '') + `${timeLabel} ${chunkText}`;
+          fullTranscribedText += (fullTranscribedText ? '\n' : '') + `${timeLabel} ${validText}`;
         }
 
         // UIスレッドおよびメモリ回収のための小休止
         await new Promise(r => setTimeout(r, 5));
       }
 
+      // 🎯 4. 最終シーケンス走査: 万が一の連続重複チャンク（2回以上同じ短文）を最終クリーンアップ
+      const finalChunks: { timestamp: [number, number]; text: string }[] = [];
+      let finalFullText = '';
+
+      for (let k = 0; k < collectedChunks.length; k++) {
+        const item = collectedChunks[k];
+        const prev = finalChunks.length > 0 ? finalChunks[finalChunks.length - 1] : null;
+        if (prev && prev.text === item.text) {
+          // 直前のチャンクと同一テキストの場合はスキップ
+          continue;
+        }
+        finalChunks.push(item);
+        const timeLabel = `[${formatTime(item.timestamp[0])} - ${formatTime(item.timestamp[1])}]`;
+        finalFullText += (finalFullText ? '\n' : '') + `${timeLabel} ${item.text}`;
+      }
+
       self.postMessage({
         type: 'TRANSCRIBE_SUCCESS',
         payload: {
-          text: fullTranscribedText,
-          chunks: collectedChunks
+          text: finalFullText,
+          chunks: finalChunks
         },
         id
       });
