@@ -601,19 +601,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </span>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
             <button
               type="button"
-              onClick={() => onChangeConfig({ ...config, audioTranscriptionEngine: 'auto' })}
+              onClick={() => onChangeConfig({ ...config, audioTranscriptionEngine: 'kotoba-whisper' })}
               className={`p-2.5 rounded-lg border text-left transition-all ${
-                (!config.audioTranscriptionEngine || config.audioTranscriptionEngine === 'auto')
+                config.audioTranscriptionEngine === 'kotoba-whisper'
                   ? 'bg-purple-950/40 border-purple-500/80 text-purple-200 shadow-sm shadow-purple-500/20'
                   : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:border-slate-700'
               }`}
             >
-              <div className="text-xs font-bold text-slate-200">🚀 自動最適化 (推奨)</div>
+              <div className="text-xs font-bold text-slate-200">🇯🇵 Kotoba-Whisper v2.2 (日本語特化)</div>
               <div className="text-[10px] text-slate-400 mt-0.5">
-                API設定時はGemini、未設定時はローカルWhisperで最速処理
+                【推奨】ReazonSpeech学習済みの最高峰日本語モデル。漢字・専門用語が極めて正確
               </div>
             </button>
 
@@ -626,9 +626,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:border-slate-700'
               }`}
             >
-              <div className="text-xs font-bold text-slate-200">☁️ Gemini 1.5 Flash</div>
+              <div className="text-xs font-bold text-slate-200">☁️ Gemini 1.5 Flash (超高速クラウド)</div>
               <div className="text-[10px] text-slate-400 mt-0.5">
-                超高速・プロ級の日本語精度（120分でも数十秒で完了）
+                120分の長尺音声も約10秒で解析。話者文脈を自動補正するGoogle最新マルチモーダル
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onChangeConfig({ ...config, audioTranscriptionEngine: 'auto' })}
+              className={`p-2.5 rounded-lg border text-left transition-all ${
+                (!config.audioTranscriptionEngine || config.audioTranscriptionEngine === 'auto')
+                  ? 'bg-purple-950/40 border-purple-500/80 text-purple-200 shadow-sm shadow-purple-500/20'
+                  : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:border-slate-700'
+              }`}
+            >
+              <div className="text-xs font-bold text-slate-200">🚀 自動最適化</div>
+              <div className="text-[10px] text-slate-400 mt-0.5">
+                Gemini API設定時はGemini、未設定時はKotoba-Whisperで最善処理
               </div>
             </button>
 
@@ -641,9 +656,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:border-slate-700'
               }`}
             >
-              <div className="text-xs font-bold text-slate-200">🔒 完全ローカル Whisper</div>
+              <div className="text-xs font-bold text-slate-200">⚡ Whisper Tiny (超軽量)</div>
               <div className="text-[10px] text-slate-400 mt-0.5">
-                端末内完結・WebGPU/VAD無音カット・外部送信ゼロ
+                英語や多言語音声向け・低スペック端末用極小モデル
               </div>
             </button>
           </div>

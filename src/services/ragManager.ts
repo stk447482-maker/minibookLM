@@ -201,7 +201,7 @@ class RAGManager {
     file: File,
     onProgress?: (status: string, percent?: number) => void,
     options?: {
-      enginePreference?: 'auto' | 'gemini' | 'whisper-local';
+      enginePreference?: 'auto' | 'gemini' | 'kotoba-whisper' | 'whisper-local';
       cloudApiKey?: string;
       abortSignal?: AbortSignal;
     }
@@ -276,7 +276,11 @@ class RAGManager {
       }
 
       // 🔒 3. 完全ローカル Whisper (WebGPU / WASM + VAD) パイプライン
-      onProgress?.(`音声デコード完了 (${durationStr})。ローカルWhisper (WebGPU/VAD) を起動中...`, 30);
+      const isKotoba = options?.enginePreference === 'kotoba-whisper' || options?.enginePreference === 'auto' || !options?.enginePreference;
+      const localModelName = isKotoba ? 'onnx-community/kotoba-whisper-v2.2-ONNX' : 'onnx-community/whisper-tiny';
+      const engineLabel = isKotoba ? 'Kotoba-Whisper v2.2 (日本語特化ONNX)' : 'Whisper-Tiny (軽量ONNX)';
+
+      onProgress?.(`音声デコード完了 (${durationStr})。${engineLabel} を起動中...`, 30);
 
       if (!this.whisperWorker) {
         this.whisperWorker = new Worker(new URL('../workers/whisper.worker.ts', import.meta.url), { type: 'module' });
@@ -290,9 +294,9 @@ class RAGManager {
           const { type, payload, message, percent, status, currentChunk, totalChunks, timeLabel } = e.data;
 
           if (type === 'DOWNLOAD_PROGRESS' && percent !== undefined) {
-            onProgress?.(`Whisperモデル読込中 (${percent}%)`, 30 + Math.round(percent * 0.2));
+            onProgress?.(`モデル読込中 (${percent}%)`, 30 + Math.round(percent * 0.2));
           } else if (type === 'STATUS' && status === 'transcribing') {
-            onProgress?.('Whisper推論実行中（文字起こし中）...', 50);
+            onProgress?.(`${engineLabel} 推論実行中...`, 50);
           } else if (type === 'TRANSCRIBE_PROGRESS') {
             onProgress?.(`文字起こし中: ${timeLabel || ''} (${currentChunk}/${totalChunks})`, 50 + Math.round(percent * 0.45));
           } else if (type === 'TRANSCRIBE_SUCCESS') {
@@ -310,17 +314,18 @@ class RAGManager {
           payload: {
             audioData,
             sampleRate: 16000,
-            language: 'japanese'
+            language: 'japanese',
+            modelName: localModelName
           }
         }, [audioData.buffer]);
       });
 
       onProgress?.('文字起こし完了！ドキュメント登録中...', 98);
 
-      let transcribedText = `## 🎙️ 音声/動画 文字起こしデータ (Local Whisper)\n`;
+      let transcribedText = `## 🎙️ 音声/動画 文字起こしデータ (${engineLabel})\n`;
       transcribedText += `- **ファイル名:** ${file.name}\n`;
       transcribedText += `- **再生時間:** ${durationStr}\n`;
-      transcribedText += `- **解析エンジン:** Local Whisper ONNX (完全端末内・外部通信なし / VAD無音カット)\n\n`;
+      transcribedText += `- **解析エンジン:** ${engineLabel} (完全端末内・外部通信なし / VAD無音カット)\n\n`;
       transcribedText += `### 📝 文字起こし内容 (Transcript)\n\n`;
 
       if (transcriptionResult.chunks && transcriptionResult.chunks.length > 0) {
@@ -356,7 +361,7 @@ class RAGManager {
     projectId: string,
     onProgress?: (percent: number, status?: string) => void,
     options?: {
-      enginePreference?: 'auto' | 'gemini' | 'whisper-local';
+      enginePreference?: 'auto' | 'gemini' | 'kotoba-whisper' | 'whisper-local';
       cloudApiKey?: string;
       abortSignal?: AbortSignal;
     }

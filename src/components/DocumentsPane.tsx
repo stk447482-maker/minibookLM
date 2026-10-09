@@ -10,7 +10,8 @@ import {
   CheckSquare,
   Square,
   DownloadCloud,
-  UploadCloud
+  UploadCloud,
+  Mic
 } from 'lucide-react';
 import { DocumentSource, Project } from '../types/index.ts';
 
@@ -32,6 +33,8 @@ interface DocumentsPaneProps {
   processProgress: number;
   processStatusText?: string;
   onCancelUpload?: () => void;
+  audioEngine?: 'auto' | 'gemini' | 'kotoba-whisper' | 'whisper-local';
+  onChangeAudioEngine?: (engine: 'auto' | 'gemini' | 'kotoba-whisper' | 'whisper-local') => void;
 }
 
 export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
@@ -51,7 +54,9 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
   isProcessing,
   processProgress,
   processStatusText,
-  onCancelUpload
+  onCancelUpload,
+  audioEngine,
+  onChangeAudioEngine
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -205,6 +210,29 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
         <span className="text-[11px] text-slate-400 font-mono">
           <span className="text-indigo-400 font-semibold">{enabledCount}</span> / {documents.length} 件 選択中
         </span>
+      </div>
+
+      {/* 🎙️ 文字起こし専用AIモデル切替ピッカー */}
+      <div className="mb-2.5 bg-slate-800/90 border border-purple-500/30 rounded-xl p-2.5 flex flex-col space-y-1.5 shadow-sm shadow-purple-950/20">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-1.5 text-purple-300 font-bold text-xs">
+            <Mic className="w-3.5 h-3.5 text-purple-400" />
+            <span>文字起こし専用AI:</span>
+          </div>
+          <span className="text-[9px] font-mono text-slate-400 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-700/50">
+            STT専用
+          </span>
+        </div>
+        <select
+          value={audioEngine || 'kotoba-whisper'}
+          onChange={(e) => onChangeAudioEngine?.(e.target.value as any)}
+          className="w-full bg-slate-900 border border-purple-500/40 rounded-lg px-2.5 py-1.5 text-xs text-purple-200 focus:outline-none focus:border-purple-400 font-medium"
+        >
+          <option value="kotoba-whisper">🇯🇵 Kotoba-Whisper v2.2 (日本語特化ONNX・推奨)</option>
+          <option value="auto">🚀 自動最適化 (Gemini優先 / Kotobaフォールバック)</option>
+          <option value="gemini">☁️ Gemini 1.5 Flash (超高速クラウド / 10秒解析)</option>
+          <option value="whisper-local">⚡ Whisper-Tiny (超軽量・英語/多言語)</option>
+        </select>
       </div>
 
       {/* ドロップゾーン */}

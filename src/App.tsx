@@ -923,6 +923,10 @@ ${fullContext}`;
             processProgress={docProgress}
             processStatusText={docStatusText}
             onCancelUpload={handleCancelUpload}
+            audioEngine={config.audioTranscriptionEngine || 'kotoba-whisper'}
+            onChangeAudioEngine={(engine) => {
+              handleUpdateConfig({ ...config, audioTranscriptionEngine: engine });
+            }}
           />
         </div>
 

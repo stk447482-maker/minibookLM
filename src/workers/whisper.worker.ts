@@ -11,7 +11,7 @@ env.useBrowserCache = true;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let transcriber: any = null;
-let currentModelName = 'onnx-community/whisper-tiny';
+let currentModelName = 'onnx-community/kotoba-whisper-v2.2-ONNX';
 
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -109,15 +109,16 @@ self.onmessage = async (e: MessageEvent) => {
   }
 
   if (type === 'TRANSCRIBE_AUDIO') {
-    const { audioData, sampleRate = 16000, language = 'japanese' } = payload;
+    const { audioData, sampleRate = 16000, language = 'japanese', modelName } = payload;
     // audioData: Float32Array (16kHz mono)
 
-    if (!transcriber) {
+    const targetModel = modelName || currentModelName;
+    if (!transcriber || currentModelName !== targetModel) {
       try {
-        await ensureTranscriber(currentModelName);
+        await ensureTranscriber(targetModel);
       } catch (initErr: unknown) {
         const msg = initErr instanceof Error ? initErr.message : String(initErr);
-        self.postMessage({ type: 'ERROR', message: `音声モデル初期化失敗: ${msg}`, id });
+        self.postMessage({ type: 'ERROR', message: `音声モデル初期化失敗 (${targetModel}): ${msg}`, id });
         return;
       }
     }

@@ -25,7 +25,7 @@ export interface ModelConfig {
   tuningProfile?: ModelTuningProfile;
   cloudApiKey?: string;
   temperature: number;
-  audioTranscriptionEngine?: 'auto' | 'gemini' | 'whisper-local';
+  audioTranscriptionEngine?: 'auto' | 'gemini' | 'kotoba-whisper' | 'whisper-local';
 }
 
 
