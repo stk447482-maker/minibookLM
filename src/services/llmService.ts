@@ -216,14 +216,16 @@ class LLMService {
           content: systemMsg.content.slice(0, maxSysChars)
         } : null;
 
-        // 2. 過去チャット履歴の自動スライディングウィンドウ（最新のやり取りから逆順に予算内で詰め込む）
-        const historyBudgetChars = 1000;
+        // 2. 過去チャット履歴の自動スライディングウィンドウ
+        // Studio生成などで単一のユーザメッセージが送られた場合は最大2,800文字まで許容
+        const isSinglePrompt = nonSystemMsgs.length === 1;
+        const historyBudgetChars = isSinglePrompt ? 2800 : 1200;
         let usedHistoryChars = 0;
         const safeHistory: { role: 'user' | 'assistant'; content: string }[] = [];
 
         for (let i = nonSystemMsgs.length - 1; i >= 0; i--) {
           const m = nonSystemMsgs[i];
-          const sliceLen = Math.min(m.content.length, 300);
+          const sliceLen = isSinglePrompt ? Math.min(m.content.length, 2800) : Math.min(m.content.length, 400);
           if (usedHistoryChars + sliceLen > historyBudgetChars && safeHistory.length >= 1) {
             break; // 予算オーバー時は古い会話を自動ドロップ（無限チャット化）
           }
