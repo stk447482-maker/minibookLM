@@ -11,6 +11,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs
 class RAGManager {
   private embedWorker: Worker | null = null;
   private searchWorker: Worker | null = null;
+  private whisperWorker: Worker | null = null;
   private isEmbedModelReady: boolean = false;
 
   constructor() {
@@ -20,6 +21,7 @@ class RAGManager {
   private initWorkers() {
     this.embedWorker = new Worker(new URL('../workers/embed.worker.ts', import.meta.url), { type: 'module' });
     this.searchWorker = new Worker(new URL('../workers/search.worker.ts', import.meta.url), { type: 'module' });
+    this.whisperWorker = new Worker(new URL('../workers/whisper.worker.ts', import.meta.url), { type: 'module' });
 
     this.searchWorker.postMessage({ type: 'INIT' });
   }
@@ -192,15 +194,15 @@ class RAGManager {
     return fullText;
   }
 
-  // 音声・動画ファイルのブラウザ内デコード＆文字起こし処理
+  // 音声・動画ファイルのブラウザ内デコード＆完全ローカルWhisper文字起こし処理
   public async parseAudioOrVideo(
     file: File,
     onProgress?: (status: string, percent?: number) => void
   ): Promise<string> {
-    onProgress?.('音声データをデコード中...', 20);
+    onProgress?.('音声データを読み込み・デコード中...', 10);
 
     try {
-      // 1. Web Audio API によるオーディオバッファ抽出
+      // 1. Web Audio API によるオーディオデコード
       const arrayBuffer = await file.arrayBuffer();
       const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
       const decodedBuffer = await audioCtx.decodeAudioData(arrayBuffer);
@@ -210,36 +212,95 @@ class RAGManager {
       const seconds = durationSec % 60;
       const durationStr = `${minutes}分${seconds}秒`;
 
-      onProgress?.(`音声デコード完了 (${durationStr})。文字起こし中...`, 60);
+      onProgress?.(`音声デコード完了 (${durationStr})。16kHzモノラルへ変換中...`, 25);
 
-      // 2. 音声メタデータとタイムスタンプ枠組みの自動構築
-      let transcribedText = `## 🎙️ 音声/動画 文字起こしデータ\n`;
-      transcribedText += `- **ファイル名:** ${file.name}\n`;
-      transcribedText += `- **再生時間:** ${durationStr}\n`;
-      transcribedText += `- **サンプリングレート:** ${decodedBuffer.sampleRate} Hz (${decodedBuffer.numberOfChannels} ch)\n\n`;
-      transcribedText += `### 📝 文字起こし内容 (Transcript)\n\n`;
+      // 2. Whisper推論用の 16,000Hz モノラル Float32Array にネイティブリサンプリング
+      const targetSampleRate = 16000;
+      const offlineCtx = new OfflineAudioContext(
+        1,
+        Math.max(1, Math.ceil(decodedBuffer.duration * targetSampleRate)),
+        targetSampleRate
+      );
+      const source = offlineCtx.createBufferSource();
+      source.buffer = decodedBuffer;
+      source.connect(offlineCtx.destination);
+      source.start(0);
 
-      // Whisper/Web Speech/Gemini 音声プロキシへの接続準備
-      // 音声データからタイムスタンプブロックを生成してRAG検索可能にする
-      const blockSizeSec = 60;
-      const totalBlocks = Math.max(1, Math.ceil(durationSec / blockSizeSec));
+      const resampledBuffer = await offlineCtx.startRendering();
+      const channelData = resampledBuffer.getChannelData(0);
 
-      for (let i = 0; i < totalBlocks; i++) {
-        const startMin = Math.floor((i * blockSizeSec) / 60);
-        const startSec = (i * blockSizeSec) % 60;
-        const endMin = Math.floor(Math.min((i + 1) * blockSizeSec, durationSec) / 60);
-        const endSec = Math.min((i + 1) * blockSizeSec, durationSec) % 60;
-        const timeLabel = `[${String(startMin).padStart(2, '0')}:${String(startSec).padStart(2, '0')} - ${String(endMin).padStart(2, '0')}:${String(endSec).padStart(2, '0')}]`;
+      onProgress?.('ローカル音声認識モデル (Whisper) を起動中...', 40);
 
-        transcribedText += `#### ${timeLabel}\n`;
-        transcribedText += `【発言記録】この区間の音声解析データ（会議発言、報告内容、質疑応答、検討事項）が記録されています。\n\n`;
+      // 3. Web Worker にて Whisper (ONNX) 音声認識を実行
+      if (!this.whisperWorker) {
+        this.whisperWorker = new Worker(new URL('../workers/whisper.worker.ts', import.meta.url), { type: 'module' });
       }
 
-      onProgress?.('文字起こし完了！', 100);
+      const transcriptionResult = await new Promise<{
+        text: string;
+        chunks: { timestamp: [number, number | null]; text: string }[];
+      }>((resolve, reject) => {
+        const handler = (e: MessageEvent) => {
+          const { type, payload, message, percent, status } = e.data;
+
+          if (type === 'DOWNLOAD_PROGRESS' && percent !== undefined) {
+            onProgress?.(`Whisperモデル読込中 (${percent}%)`, 40 + Math.round(percent * 0.3));
+          } else if (type === 'STATUS' && status === 'transcribing') {
+            onProgress?.('Whisper推論実行中（文字起こし中）...', 75);
+          } else if (type === 'TRANSCRIBE_SUCCESS') {
+            this.whisperWorker?.removeEventListener('message', handler);
+            resolve(payload);
+          } else if (type === 'ERROR') {
+            this.whisperWorker?.removeEventListener('message', handler);
+            reject(new Error(message));
+          }
+        };
+
+        this.whisperWorker!.addEventListener('message', handler);
+        this.whisperWorker!.postMessage({
+          type: 'TRANSCRIBE_AUDIO',
+          payload: {
+            audioData: channelData,
+            sampleRate: targetSampleRate,
+            language: 'japanese'
+          }
+        });
+      });
+
+      onProgress?.('文字起こし完了！ドキュメント登録中...', 95);
+
+      // 4. 認識結果をRAG＆議事録生成に最適なマークダウン形式に整理
+      let transcribedText = `## 🎙️ 音声/動画 文字起こしデータ (Whisper)\n`;
+      transcribedText += `- **ファイル名:** ${file.name}\n`;
+      transcribedText += `- **再生時間:** ${durationStr}\n`;
+      transcribedText += `- **解析エンジン:** Local Whisper ONNX (完全端末内・外部通信なし)\n\n`;
+      transcribedText += `### 📝 文字起こし内容 (Transcript)\n\n`;
+
+      if (transcriptionResult.chunks && transcriptionResult.chunks.length > 0) {
+        for (const chunk of transcriptionResult.chunks) {
+          const s = Math.floor(chunk.timestamp[0] || 0);
+          const e = Math.floor(chunk.timestamp[1] ?? (s + 5));
+          const sMin = Math.floor(s / 60);
+          const sSec = s % 60;
+          const eMin = Math.floor(e / 60);
+          const eSec = e % 60;
+          const timeLabel = `[${String(sMin).padStart(2, '0')}:${String(sSec).padStart(2, '0')} - ${String(eMin).padStart(2, '0')}:${String(eSec).padStart(2, '0')}]`;
+          const chunkText = (chunk.text || '').trim();
+          if (chunkText) {
+            transcribedText += `#### ${timeLabel}\n${chunkText}\n\n`;
+          }
+        }
+      } else if (transcriptionResult.text && transcriptionResult.text.trim()) {
+        transcribedText += `${transcriptionResult.text.trim()}\n\n`;
+      } else {
+        transcribedText += `（※ 音声から有意な発話が検出されませんでした）\n\n`;
+      }
+
+      onProgress?.('完了', 100);
       return transcribedText;
     } catch (e: any) {
-      // WMAなどのWeb Audio API非対応フォーマット向けフォールバック
-      return `## 🎙️ 音声/動画データ (${file.name})\n- サイズ: ${Math.round(file.size / 1024)} KB\n- 種別: ${file.type || 'audio/video'}\n\nこのメディアファイルの音声トラックがドキュメントとして登録されました。`;
+      console.warn('Whisper transcription failed, fallback to audio metadata:', e);
+      return `## 🎙️ 音声/動画データ (${file.name})\n- サイズ: ${Math.round(file.size / 1024)} KB\n- 種別: ${file.type || 'audio/video'}\n\n【注意】音声文字起こし処理中にエラーが発生しました (${e?.message || e})。音声メタデータのみ登録されています。`;
     }
   }
 
