@@ -5,7 +5,8 @@
 import * as pdfjsLib from 'pdfjs-dist';
 import { DocumentChunk, DocumentSource, SourceReference, FactSkeleton } from '../types/index.ts';
 import { dbService } from './db.ts';
-import { decodeAudioTo16kMono } from './audioDecoder.ts';
+import { decodeAudioTo16kMono, createWavBlobFromFloat32 } from './audioDecoder.ts';
+import { llmService } from './llmService.ts';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
 
@@ -195,10 +196,15 @@ class RAGManager {
     return fullText;
   }
 
-  // 音声・動画ファイルのブラウザ内デコード＆完全ローカルWhisper文字起こし処理
+  // 音声・動画ファイルのブラウザ内デコード＆ハイブリッド文字起こし処理 (Gemini 1.5 Flash / Local WebGPU Whisper)
   public async parseAudioOrVideo(
     file: File,
-    onProgress?: (status: string, percent?: number) => void
+    onProgress?: (status: string, percent?: number) => void,
+    options?: {
+      enginePreference?: 'auto' | 'gemini' | 'whisper-local';
+      cloudApiKey?: string;
+      abortSignal?: AbortSignal;
+    }
   ): Promise<string> {
     onProgress?.('音声データを読み込み・デコード中...', 10);
 
@@ -211,9 +217,67 @@ class RAGManager {
       const seconds = roundedDuration % 60;
       const durationStr = `${minutes}分${seconds}秒`;
 
-      onProgress?.(`音声デコード完了 (${durationStr})。Whisperモデルを起動中...`, 30);
+      const useGemini = (options?.enginePreference === 'gemini' || options?.enginePreference === 'auto' || !options?.enginePreference) && !!options?.cloudApiKey;
 
-      // 2. Web Worker にて Whisper (ONNX) 音声認識を実行
+      // 🚀 2. Gemini 1.5 Flash Direct Audio パイプライン（超高速・高精度）
+      if (useGemini && options?.cloudApiKey) {
+        try {
+          onProgress?.(`音声デコード完了 (${durationStr})。Gemini 1.5 Flashで超高精度文字起こし中...`, 30);
+
+          const sampleRate = 16000;
+          const SEGMENT_DURATION_SEC = 300; // 5分（約9.6MB）ごとに安全分割投入
+          const segmentSamples = SEGMENT_DURATION_SEC * sampleRate;
+          const totalSegments = Math.max(1, Math.ceil(audioData.length / segmentSamples));
+
+          let combinedTranscript = '';
+
+          for (let s = 0; s < totalSegments; s++) {
+            if (options?.abortSignal?.aborted) {
+              throw new Error('ユーザーにより処理がキャンセルされました');
+            }
+
+            const startSample = s * segmentSamples;
+            const endSample = Math.min((s + 1) * segmentSamples, audioData.length);
+            const chunkAudio = audioData.slice(startSample, endSample);
+            const timeOffsetSec = s * SEGMENT_DURATION_SEC;
+
+            const percent = 30 + Math.round(((s + 1) / totalSegments) * 65);
+            onProgress?.(`Gemini解析中: [${Math.floor(timeOffsetSec / 60)}分〜] (${s + 1}/${totalSegments})`, percent);
+
+            const chunkBlob = createWavBlobFromFloat32(chunkAudio, sampleRate);
+            const segmentText = await llmService.transcribeAudioWithGemini(
+              options.cloudApiKey,
+              chunkBlob,
+              timeOffsetSec,
+              options.abortSignal
+            );
+
+            if (segmentText) {
+              combinedTranscript += (combinedTranscript ? '\n\n' : '') + segmentText;
+            }
+          }
+
+          let transcribedText = `## 🎙️ 音声/動画 文字起こしデータ (Gemini 1.5 Flash)\n`;
+          transcribedText += `- **ファイル名:** ${file.name}\n`;
+          transcribedText += `- **再生時間:** ${durationStr}\n`;
+          transcribedText += `- **解析エンジン:** Google Gemini 1.5 Flash Multimodal Audio (超高速・文脈自動補正)\n\n`;
+          transcribedText += `### 📝 文字起こし内容 (Transcript)\n\n`;
+          transcribedText += combinedTranscript || '（※ 音声から有意な発話が検出されませんでした）\n\n';
+
+          onProgress?.('完了', 100);
+          return transcribedText;
+        } catch (geminiErr: any) {
+          console.warn('Gemini Audio transcription failed, falling back to Local Whisper:', geminiErr);
+          if (options?.enginePreference === 'gemini') {
+            throw new Error(`Gemini 音声文字起こしエラー: ${geminiErr?.message || geminiErr}`);
+          }
+          // auto モード時はローカル Whisper へ自動フォールバック
+        }
+      }
+
+      // 🔒 3. 完全ローカル Whisper (WebGPU / WASM + VAD) パイプライン
+      onProgress?.(`音声デコード完了 (${durationStr})。ローカルWhisper (WebGPU/VAD) を起動中...`, 30);
+
       if (!this.whisperWorker) {
         this.whisperWorker = new Worker(new URL('../workers/whisper.worker.ts', import.meta.url), { type: 'module' });
       }
@@ -253,11 +317,10 @@ class RAGManager {
 
       onProgress?.('文字起こし完了！ドキュメント登録中...', 98);
 
-      // 4. 認識結果をRAG＆議事録生成に最適なマークダウン形式に整理
-      let transcribedText = `## 🎙️ 音声/動画 文字起こしデータ (Whisper)\n`;
+      let transcribedText = `## 🎙️ 音声/動画 文字起こしデータ (Local Whisper)\n`;
       transcribedText += `- **ファイル名:** ${file.name}\n`;
       transcribedText += `- **再生時間:** ${durationStr}\n`;
-      transcribedText += `- **解析エンジン:** Local Whisper ONNX (完全端末内・外部通信なし)\n\n`;
+      transcribedText += `- **解析エンジン:** Local Whisper ONNX (完全端末内・外部通信なし / VAD無音カット)\n\n`;
       transcribedText += `### 📝 文字起こし内容 (Transcript)\n\n`;
 
       if (transcriptionResult.chunks && transcriptionResult.chunks.length > 0) {
@@ -283,7 +346,7 @@ class RAGManager {
       onProgress?.('完了', 100);
       return transcribedText;
     } catch (e: any) {
-      console.error('Whisper transcription failed:', e);
+      console.error('Audio transcription failed:', e);
       throw new Error(`音声文字起こし処理に失敗しました: ${e?.message || e}`);
     }
   }
@@ -291,7 +354,12 @@ class RAGManager {
   public async processDocument(
     file: File,
     projectId: string,
-    onProgress?: (percent: number, status?: string) => void
+    onProgress?: (percent: number, status?: string) => void,
+    options?: {
+      enginePreference?: 'auto' | 'gemini' | 'whisper-local';
+      cloudApiKey?: string;
+      abortSignal?: AbortSignal;
+    }
   ): Promise<{ doc: DocumentSource; chunks: DocumentChunk[] }> {
     let content = '';
     let docType: 'pdf' | 'text' | 'markdown' | 'audio' | 'video' = 'text';
@@ -304,12 +372,12 @@ class RAGManager {
       docType = 'audio';
       content = await this.parseAudioOrVideo(file, (status, p) => {
         if (p !== undefined) onProgress?.(p, status);
-      });
+      }, options);
     } else if (ext.endsWith('.mp4') || ext.endsWith('.webm') || ext.endsWith('.mov') || ext.endsWith('.mkv')) {
       docType = 'video';
       content = await this.parseAudioOrVideo(file, (status, p) => {
         if (p !== undefined) onProgress?.(p, status);
-      });
+      }, options);
     } else {
       content = await file.text();
     }

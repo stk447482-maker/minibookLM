@@ -31,6 +31,7 @@ interface DocumentsPaneProps {
   isProcessing: boolean;
   processProgress: number;
   processStatusText?: string;
+  onCancelUpload?: () => void;
 }
 
 export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
@@ -49,7 +50,8 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
   onRemoveAllDocs,
   isProcessing,
   processProgress,
-  processStatusText
+  processStatusText,
+  onCancelUpload
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -225,7 +227,7 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
           className="hidden"
         />
         {isProcessing ? (
-          <div className="flex flex-col items-center justify-center space-y-1 py-1">
+          <div className="flex flex-col items-center justify-center space-y-1.5 py-1">
             <Loader2 className="w-5 h-5 text-indigo-400 animate-spin" />
             <span className="text-xs text-slate-200 font-medium text-center truncate max-w-full px-2">
               {processStatusText || '解析＆文字起こし中...'} ({processProgress}%)
@@ -236,6 +238,18 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
                 style={{ width: `${processProgress}%` }}
               />
             </div>
+            {onCancelUpload && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onCancelUpload();
+                }}
+                className="text-[10px] text-rose-400 hover:text-rose-300 hover:underline pt-0.5"
+              >
+                処理を中止する
+              </button>
+            )}
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center space-y-1 py-1">

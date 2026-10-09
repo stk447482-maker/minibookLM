@@ -19,6 +19,18 @@ function formatTime(seconds: number): string {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
+// 🎯 VAD (Voice Activity Detection) - 高速RMS音量エネルギー計算
+function computeRmsEnergy(samples: Float32Array): number {
+  if (!samples || samples.length === 0) return 0;
+  let sumSquares = 0;
+  const step = 4;
+  const count = Math.floor(samples.length / step);
+  for (let i = 0; i < samples.length; i += step) {
+    sumSquares += samples[i] * samples[i];
+  }
+  return Math.sqrt(sumSquares / Math.max(1, count));
+}
+
 async function ensureTranscriber(modelName: string = currentModelName) {
   if (transcriber && currentModelName === modelName) return transcriber;
 
@@ -28,6 +40,35 @@ async function ensureTranscriber(modelName: string = currentModelName) {
     message: `音声認識モデル (${modelName}) を初期化中...`
   });
 
+  const progressCallback = (progress: { status: string; progress?: number; file?: string }) => {
+    if (progress.status === 'progress' && progress.progress !== undefined) {
+      self.postMessage({
+        type: 'DOWNLOAD_PROGRESS',
+        file: progress.file,
+        percent: Math.round(progress.progress)
+      });
+    }
+  };
+
+  // 1. WebGPU が利用可能な場合は優先試行（5〜8倍高速）
+  if (typeof navigator !== 'undefined' && 'gpu' in navigator) {
+    try {
+      transcriber = await pipeline('automatic-speech-recognition', modelName, {
+        dtype: {
+          encoder_model: 'fp32',
+          decoder_model_merged: 'q4'
+        },
+        device: 'webgpu',
+        progress_callback: progressCallback
+      });
+      currentModelName = modelName;
+      return transcriber;
+    } catch (gpuErr) {
+      console.warn('WebGPU Whisper起動失敗、WASMへフォールバック:', gpuErr);
+    }
+  }
+
+  // 2. WASM フォールバック
   try {
     transcriber = await pipeline('automatic-speech-recognition', modelName, {
       dtype: {
@@ -35,32 +76,15 @@ async function ensureTranscriber(modelName: string = currentModelName) {
         decoder_model_merged: 'q4'
       },
       device: 'wasm',
-      progress_callback: (progress: { status: string; progress?: number; file?: string }) => {
-        if (progress.status === 'progress' && progress.progress !== undefined) {
-          self.postMessage({
-            type: 'DOWNLOAD_PROGRESS',
-            file: progress.file,
-            percent: Math.round(progress.progress)
-          });
-        }
-      }
+      progress_callback: progressCallback
     });
     currentModelName = modelName;
     return transcriber;
   } catch (err: unknown) {
-    // フォールバック: 標準構成でリトライ
     try {
       transcriber = await pipeline('automatic-speech-recognition', modelName, {
         device: 'wasm',
-        progress_callback: (progress: { status: string; progress?: number; file?: string }) => {
-          if (progress.status === 'progress' && progress.progress !== undefined) {
-            self.postMessage({
-              type: 'DOWNLOAD_PROGRESS',
-              file: progress.file,
-              percent: Math.round(progress.progress)
-            });
-          }
-        }
+        progress_callback: progressCallback
       });
       currentModelName = modelName;
       return transcriber;
@@ -127,6 +151,13 @@ self.onmessage = async (e: MessageEvent) => {
           timeLabel
         });
 
+        // 🎯 VAD判定: 無音・微小ノイズ区間は推論スキップして高速化＆定型幻覚防止
+        const rms = computeRmsEnergy(chunkAudio);
+        if (rms < 0.0035) {
+          // 無音区間はスキップ
+          continue;
+        }
+
         // 30秒ごとの推論を実行
         const res = await transcriber(chunkAudio, {
           sampling_rate: sampleRate,
@@ -134,7 +165,12 @@ self.onmessage = async (e: MessageEvent) => {
           task: 'transcribe'
         });
 
-        const chunkText = (res.text || '').trim();
+        let chunkText = (res.text || '').trim();
+        // Whisper特有の無音ハルシネーション定型句の除去
+        if (chunkText === 'ご視聴ありがとうございました' || chunkText === 'ご視聴ありがとうございました。' || chunkText === 'チャンネル登録お願いします。' || chunkText === 'Thank you.') {
+          chunkText = '';
+        }
+
         if (chunkText) {
           collectedChunks.push({
             timestamp: [startTime, endTime],

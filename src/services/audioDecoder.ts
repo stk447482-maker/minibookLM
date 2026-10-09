@@ -197,3 +197,51 @@ export async function decodeAudioTo16kMono(file: File): Promise<{
     durationSec
   };
 }
+
+/**
+ * 16kHz モノラル Float32Array またはその一部を標準 16-bit PCM WAV Blob に変換
+ */
+export function createWavBlobFromFloat32(audioData: Float32Array, sampleRate = 16000): Blob {
+  const numChannels = 1;
+  const bitsPerSample = 16;
+  const bytesPerSample = 2;
+  const blockAlign = numChannels * bytesPerSample;
+  const byteRate = sampleRate * blockAlign;
+  const dataSize = audioData.length * bytesPerSample;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+
+  const writeStr = (v: DataView, offset: number, str: string) => {
+    for (let i = 0; i < str.length; i++) {
+      v.setUint8(offset + i, str.charCodeAt(i));
+    }
+  };
+
+  // RIFF 識別子
+  writeStr(view, 0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  writeStr(view, 8, 'WAVE');
+
+  // fmt チャンク
+  writeStr(view, 12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitsPerSample, true);
+
+  // data チャンク
+  writeStr(view, 36, 'data');
+  view.setUint32(40, dataSize, true);
+
+  // PCM サンプル書き込み
+  let offset = 44;
+  for (let i = 0; i < audioData.length; i++, offset += 2) {
+    const s = Math.max(-1, Math.min(1, audioData[i]));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+  }
+
+  return new Blob([buffer], { type: 'audio/wav' });
+}

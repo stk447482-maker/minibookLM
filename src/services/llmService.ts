@@ -284,6 +284,80 @@ class LLMService {
     throw new Error('ブラウザのWebGPUが非対応または未ロードです。「⚙️設定」から「☁️ Google Gemini API (無料)」のAPIキーを入力していただくか、WebGPU対応ブラウザ（Chrome/Edge最新版）をご利用ください。');
   }
 
+  /**
+   * Google Gemini 1.5 Flash Direct Multimodal Audio による超高速・高精度日本語文字起こし
+   */
+  public async transcribeAudioWithGemini(
+    apiKey: string,
+    audioBlob: Blob,
+    timeOffsetSec = 0,
+    abortSignal?: AbortSignal
+  ): Promise<string> {
+    const base64Data = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const result = (reader.result as string) || '';
+        const commaIdx = result.indexOf(',');
+        resolve(commaIdx !== -1 ? result.substring(commaIdx + 1) : result);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(audioBlob);
+    });
+
+    const startMin = Math.floor(timeOffsetSec / 60);
+    const startSec = timeOffsetSec % 60;
+    const timeHint = timeOffsetSec > 0
+      ? `※ この音声セクションの開始オフセット時刻は [${String(startMin).padStart(2, '0')}:${String(startSec).padStart(2, '0')}] です。タイムスタンプにはこのオフセットを加算して表記してください。`
+      : '';
+
+    const prompt = `あなたは最高精度の日本語音声文字起こしAIです。
+提供された音声ファイルを忠実に日本語で文字起こししてください。
+
+【厳格ルール】
+1. 発話内容を一言一句漏らさず正確に書き起こしてください。言い淀み（えー、あのー等）は自然に整形してください。
+2. 会話やトピックの区切りごとに、必ず \`#### [MM:SS - MM:SS]\` 形式のタイムスタンプ見出しを付けてください。
+3. 専門用語、固有名詞、数字、日付を正確に書き起こしてください。
+4. 前置きや挨拶（「承知しました」「文字起こし結果です」等）は一切省き、文字起こし本文のみを出力してください。
+${timeHint}`;
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    const payload = {
+      contents: [
+        {
+          parts: [
+            {
+              inline_data: {
+                mime_type: 'audio/wav',
+                data: base64Data
+              }
+            },
+            {
+              text: prompt
+            }
+          ]
+        }
+      ],
+      generationConfig: {
+        temperature: 0.1
+      }
+    };
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: abortSignal
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`Gemini Audio APIエラー (${res.status}): ${errText}`);
+    }
+
+    const data = await res.json();
+    const resultText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    return resultText.trim();
+  }
 }
 
 export const llmService = new LLMService();

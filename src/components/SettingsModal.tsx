@@ -590,27 +590,84 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
         )}
 
-        {/* ☁️ Gemini API 詳細設定 */}
-        {config.mode === 'cloud-gemini' && (
-          <div className="space-y-2.5 bg-slate-950/80 p-3.5 rounded-xl border border-slate-800">
-            <div className="flex items-center space-x-1.5 text-xs font-semibold text-indigo-400">
-              <Key className="w-3.5 h-3.5" />
-              <span>Google AI Studio APIキー設定</span>
+        {/* 🎙️ 音声文字起こしエンジン設定 */}
+        <div className="space-y-2.5 bg-slate-950/80 p-3.5 rounded-xl border border-slate-800">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-1.5 text-xs font-semibold text-purple-400">
+              <span>🎙️ 音声・動画の文字起こしエンジン</span>
             </div>
-            <div>
+            <span className="text-[10px] font-mono text-slate-400 bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
+              WAV / MP3 / M4A / 動画
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+            <button
+              type="button"
+              onClick={() => onChangeConfig({ ...config, audioTranscriptionEngine: 'auto' })}
+              className={`p-2.5 rounded-lg border text-left transition-all ${
+                (!config.audioTranscriptionEngine || config.audioTranscriptionEngine === 'auto')
+                  ? 'bg-purple-950/40 border-purple-500/80 text-purple-200 shadow-sm shadow-purple-500/20'
+                  : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:border-slate-700'
+              }`}
+            >
+              <div className="text-xs font-bold text-slate-200">🚀 自動最適化 (推奨)</div>
+              <div className="text-[10px] text-slate-400 mt-0.5">
+                API設定時はGemini、未設定時はローカルWhisperで最速処理
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onChangeConfig({ ...config, audioTranscriptionEngine: 'gemini' })}
+              className={`p-2.5 rounded-lg border text-left transition-all ${
+                config.audioTranscriptionEngine === 'gemini'
+                  ? 'bg-indigo-950/40 border-indigo-500/80 text-indigo-200 shadow-sm shadow-indigo-500/20'
+                  : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:border-slate-700'
+              }`}
+            >
+              <div className="text-xs font-bold text-slate-200">☁️ Gemini 1.5 Flash</div>
+              <div className="text-[10px] text-slate-400 mt-0.5">
+                超高速・プロ級の日本語精度（120分でも数十秒で完了）
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onChangeConfig({ ...config, audioTranscriptionEngine: 'whisper-local' })}
+              className={`p-2.5 rounded-lg border text-left transition-all ${
+                config.audioTranscriptionEngine === 'whisper-local'
+                  ? 'bg-emerald-950/40 border-emerald-500/80 text-emerald-200 shadow-sm shadow-emerald-500/20'
+                  : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:border-slate-700'
+              }`}
+            >
+              <div className="text-xs font-bold text-slate-200">🔒 完全ローカル Whisper</div>
+              <div className="text-[10px] text-slate-400 mt-0.5">
+                端末内完結・WebGPU/VAD無音カット・外部送信ゼロ
+              </div>
+            </button>
+          </div>
+
+          {/* APIキー入力 (Gemini利用時) */}
+          {(config.mode === 'cloud-gemini' || config.audioTranscriptionEngine === 'gemini' || !config.audioTranscriptionEngine || config.audioTranscriptionEngine === 'auto') && (
+            <div className="pt-2 border-t border-slate-800/80">
+              <label className="text-[10px] text-slate-400 flex items-center space-x-1 mb-1">
+                <Key className="w-3 h-3 text-purple-400" />
+                <span>Google AI Studio (Gemini) APIキー</span>
+              </label>
               <input
                 type="password"
                 value={config.cloudApiKey || ''}
                 onChange={(e) => onChangeConfig({ ...config, cloudApiKey: e.target.value })}
-                placeholder="AIzaSy..."
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-indigo-500 font-mono"
+                placeholder="AIzaSy... (Gemini超高速文字起こしに必要)"
+                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-purple-500 font-mono"
               />
               <span className="text-[10px] text-slate-500 block mt-1">
-                ※ APIキーはお使いのブラウザ（localStorage）にのみ保存され、外部には送信されません。
+                ※ 未設定の場合は自動的に完全ローカルWhisperで文字起こしが実行されます。
               </span>
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
         <div className="flex justify-end pt-1">
           <button

@@ -67,6 +67,7 @@ export const App: React.FC = () => {
   const [streamingStudioArtifact, setStreamingStudioArtifact] = useState<{ type: StudioTab; title: string; content: string } | null>(null);
   const studioAbortControllerRef = useRef<AbortController | null>(null);
   const chatAbortControllerRef = useRef<AbortController | null>(null);
+  const uploadAbortControllerRef = useRef<AbortController | null>(null);
 
   const handleCancelStudio = () => {
     if (studioAbortControllerRef.current) {
@@ -75,6 +76,16 @@ export const App: React.FC = () => {
     }
     setIsGeneratingStudio(false);
     setStreamingStudioArtifact(null);
+  };
+
+  const handleCancelUpload = () => {
+    if (uploadAbortControllerRef.current) {
+      uploadAbortControllerRef.current.abort();
+      uploadAbortControllerRef.current = null;
+    }
+    setIsProcessingDoc(false);
+    setDocProgress(0);
+    setDocStatusText('');
   };
 
   // 1. 初回マウント時: IndexedDBからプロジェクト復元
@@ -186,12 +197,19 @@ export const App: React.FC = () => {
   const handleUpload = async (files: FileList) => {
     if (!activeProject) return;
 
+    if (uploadAbortControllerRef.current) {
+      uploadAbortControllerRef.current.abort();
+    }
+    const uploadAbort = new AbortController();
+    uploadAbortControllerRef.current = uploadAbort;
+
     setIsProcessingDoc(true);
     setDocProgress(0);
     setDocStatusText('ファイルを解析中...');
 
     try {
       for (let i = 0; i < files.length; i++) {
+        if (uploadAbort.signal.aborted) break;
         const file = files[i];
         try {
           // 同名ドキュメントが既に存在する場合は旧ドキュメント（旧メタデータや古い内容）を自動削除して置換
@@ -201,10 +219,19 @@ export const App: React.FC = () => {
             setDocuments(prev => prev.filter(d => d.id !== existingSameName.id));
           }
 
-          const { doc, chunks } = await ragManager.processDocument(file, activeProject.id, (percent, status) => {
-            setDocProgress(percent);
-            if (status) setDocStatusText(status);
-          });
+          const { doc, chunks } = await ragManager.processDocument(
+            file,
+            activeProject.id,
+            (percent, status) => {
+              setDocProgress(percent);
+              if (status) setDocStatusText(status);
+            },
+            {
+              enginePreference: config.audioTranscriptionEngine,
+              cloudApiKey: config.cloudApiKey,
+              abortSignal: uploadAbort.signal
+            }
+          );
 
           await dbService.saveDocument(doc);
           await dbService.saveChunks(chunks);
@@ -214,6 +241,7 @@ export const App: React.FC = () => {
             return exists ? prev.map(d => d.id === doc.id ? doc : d) : [...prev, doc];
           });
         } catch (err: unknown) {
+          if (uploadAbort.signal.aborted) break;
           const msg = err instanceof Error ? err.message : String(err);
           alert(`ドキュメント処理に失敗しました: ${msg}`);
         }
@@ -226,6 +254,7 @@ export const App: React.FC = () => {
       setIsProcessingDoc(false);
       setDocProgress(0);
       setDocStatusText('');
+      uploadAbortControllerRef.current = null;
     }
   };
 
@@ -893,6 +922,7 @@ ${fullContext}`;
             isProcessing={isProcessingDoc}
             processProgress={docProgress}
             processStatusText={docStatusText}
+            onCancelUpload={handleCancelUpload}
           />
         </div>
 
