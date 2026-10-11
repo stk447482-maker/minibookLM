@@ -162,6 +162,27 @@ class LLMService {
   }
 
   // 2.5 LM Studio / OpenAI 互換 API へのストリーミング (http://localhost:1234/v1/chat/completions)
+  // LM Studio / OpenAI互換サーバーからロード中モデル一覧を取得
+  public async getLMStudioModels(endpoint: string = 'http://127.0.0.1:1234/v1'): Promise<string[]> {
+    try {
+      let clean = endpoint.replace(/\/+$/, '');
+      if (clean.endsWith('/chat/completions')) clean = clean.replace(/\/chat\/completions$/, '');
+      if (!clean.endsWith('/v1')) clean = `${clean}/v1`;
+
+      const res = await fetch(`${clean}/models`, {
+        method: 'GET',
+        headers: { 'Authorization': 'Bearer lm-studio' },
+        signal: AbortSignal.timeout(3000)
+      });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return (data.data || []).map((m: any) => m.id).filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+
+  // 2.5 LM Studio / OpenAI 互換 API へのストリーミング (http://localhost:1234/v1/chat/completions)
   private async *streamOpenAICompatible(
     endpoint: string,
     model: string,
@@ -170,12 +191,29 @@ class LLMService {
     abortSignal?: AbortSignal
   ): AsyncIterable<string> {
     let cleanEndpoint = endpoint.replace(/\/+$/, '');
+    let baseUrl = cleanEndpoint;
+    if (baseUrl.endsWith('/chat/completions')) baseUrl = baseUrl.replace(/\/chat\/completions$/, '');
     if (!cleanEndpoint.endsWith('/chat/completions')) {
       if (cleanEndpoint.endsWith('/v1')) {
         cleanEndpoint = `${cleanEndpoint}/chat/completions`;
       } else {
         cleanEndpoint = `${cleanEndpoint}/v1/chat/completions`;
       }
+    }
+
+    // モデル名が未指定の場合、/v1/models から現在ロード中の先頭モデルを自動補完
+    let targetModel = model?.trim();
+    if (!targetModel) {
+      const models = await this.getLMStudioModels(baseUrl);
+      // 埋め込みモデル以外のテキスト生成モデルを優先
+      const chatModel = models.find(m => !m.includes('embedding') && !m.includes('embed')) || models[0];
+      if (chatModel) {
+        targetModel = chatModel;
+      }
+    }
+
+    if (!targetModel) {
+      throw new Error('LM Studio でロード中のモデルが見つかりません。LM Studio 画面でモデルをロードするか、「⚙️設定」で使用モデル名を入力してください。');
     }
 
     const res = await fetch(cleanEndpoint, {
@@ -185,7 +223,7 @@ class LLMService {
         'Authorization': 'Bearer lm-studio'
       },
       body: JSON.stringify({
-        model: model || 'default',
+        model: targetModel,
         messages,
         temperature,
         stream: true

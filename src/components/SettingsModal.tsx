@@ -143,6 +143,35 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [scanError, setScanError] = useState<string | null>(null);
 
 
+  // LM Studio 接続状態＆検出モデル一覧
+  const [lmStudioModels, setLmStudioModels] = useState<string[]>([]);
+  const [isCheckingLM, setIsCheckingLM] = useState<boolean>(false);
+  const [lmConnectionStatus, setLmConnectionStatus] = useState<'idle' | 'connected' | 'failed'>('idle');
+
+  const handleTestLMStudioConnection = async () => {
+    setIsCheckingLM(true);
+    setLmConnectionStatus('idle');
+    try {
+      const endpoint = config.lmStudioEndpoint || 'http://127.0.0.1:1234/v1';
+      const models = await llmService.getLMStudioModels(endpoint);
+      if (models.length > 0) {
+        setLmStudioModels(models);
+        setLmConnectionStatus('connected');
+        // チャットモデルを自動選択
+        const chatModel = models.find(m => !m.includes('embedding') && !m.includes('embed')) || models[0];
+        if (chatModel && !config.desktopModelName) {
+          onChangeConfig({ ...config, desktopModelName: chatModel });
+        }
+      } else {
+        setLmConnectionStatus('failed');
+      }
+    } catch {
+      setLmConnectionStatus('failed');
+    } finally {
+      setIsCheckingLM(false);
+    }
+  };
+
   // モバイルダウンロード状態管理
   const [downloadProgress, setDownloadProgress] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState<boolean>(false);
@@ -564,20 +593,46 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <Database className="w-4 h-4 text-purple-400" />
                 <h4 className="text-xs font-bold text-slate-200">LM Studio 接続設定</h4>
               </div>
-              <span className="text-[10px] bg-purple-500/10 text-purple-300 border border-purple-500/30 px-2 py-0.5 rounded font-mono">
-                OpenAI互換 (v1)
-              </span>
+              <div className="flex items-center space-x-1.5">
+                {lmConnectionStatus === 'connected' && (
+                  <span className="text-[10px] bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded font-mono flex items-center space-x-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span>🟢 接続成功 ({lmStudioModels.length}件ロード済)</span>
+                  </span>
+                )}
+                {lmConnectionStatus === 'failed' && (
+                  <span className="text-[10px] bg-rose-500/10 text-rose-300 border border-rose-500/30 px-2 py-0.5 rounded font-mono">
+                    🔴 接続失敗 (サーバー未起動)
+                  </span>
+                )}
+                {lmConnectionStatus === 'idle' && (
+                  <span className="text-[10px] bg-purple-500/10 text-purple-300 border border-purple-500/30 px-2 py-0.5 rounded font-mono">
+                    OpenAI互換 (v1)
+                  </span>
+                )}
+              </div>
             </div>
 
             <div>
-              <label className="text-[10px] text-slate-400 block mb-1">
-                LM Studio ローカルサーバーURL
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-[10px] text-slate-400 block">
+                  LM Studio ローカルサーバーURL
+                </label>
+                <button
+                  type="button"
+                  onClick={handleTestLMStudioConnection}
+                  disabled={isCheckingLM}
+                  className="text-[10px] text-purple-300 hover:text-purple-200 bg-purple-950/60 hover:bg-purple-900/60 border border-purple-500/40 px-2 py-0.5 rounded flex items-center space-x-1 transition-all"
+                >
+                  <RefreshCw className={`w-3 h-3 ${isCheckingLM ? 'animate-spin' : ''}`} />
+                  <span>{isCheckingLM ? '確認中...' : '接続テスト＆モデル取得'}</span>
+                </button>
+              </div>
               <input
                 type="text"
-                value={config.lmStudioEndpoint || 'http://localhost:1234/v1'}
+                value={config.lmStudioEndpoint || 'http://127.0.0.1:1234/v1'}
                 onChange={(e) => onChangeConfig({ ...config, lmStudioEndpoint: e.target.value })}
-                placeholder="http://localhost:1234/v1"
+                placeholder="http://127.0.0.1:1234/v1"
                 className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-purple-500 font-mono"
               />
               <span className="text-[10px] text-slate-500 block mt-1">
@@ -587,15 +642,34 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
             <div>
               <label className="text-[10px] text-slate-400 block mb-1">
-                ロード中モデル名 (任意: 未指定の場合はLM Studioでロード中のモデルが使用されます)
+                使用モデル選択
               </label>
-              <input
-                type="text"
-                value={config.desktopModelName || ''}
-                onChange={(e) => onChangeConfig({ ...config, desktopModelName: e.target.value })}
-                placeholder="例: qwen2.5-7b-instruct, deepseek-r1-distill-qwen-7b (空欄可)"
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-purple-500 font-mono"
-              />
+              {lmStudioModels.length > 0 ? (
+                <select
+                  value={config.desktopModelName || lmStudioModels[0] || ''}
+                  onChange={(e) => onChangeConfig({ ...config, desktopModelName: e.target.value })}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-purple-500 font-mono"
+                >
+                  {lmStudioModels.map((mId, idx) => (
+                    <option key={idx} value={mId}>
+                      🤖 {mId}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  value={config.desktopModelName || ''}
+                  onChange={(e) => onChangeConfig({ ...config, desktopModelName: e.target.value })}
+                  placeholder="例: qwen2.5-coder-7b-instruct (右上の「接続テスト」で自動検出可)"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-purple-500 font-mono"
+                />
+              )}
+              {config.desktopModelName && (
+                <p className="text-[10px] text-emerald-400 mt-1 font-mono">
+                  ✓ 送信対象モデル: {config.desktopModelName}
+                </p>
+              )}
             </div>
           </div>
         )}

@@ -77,7 +77,12 @@ export const Header: React.FC<HeaderProps> = ({
           onClick={onOpenSettings}
           className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700/70 text-xs font-medium text-slate-200 transition-colors shadow-sm"
         >
-          {config.mode === 'cloud-gemini' || config.cloudApiKey ? (
+          {config.mode === 'lmstudio' ? (
+            <>
+              <span className="w-2 h-2 rounded-full bg-purple-400 animate-pulse"></span>
+              <span className="text-purple-300">🎛️ LM Studio {config.desktopModelName ? `(${config.desktopModelName})` : ''}</span>
+            </>
+          ) : config.mode === 'cloud-gemini' || config.cloudApiKey ? (
             <>
               <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
               <span>☁️ Gemini API</span>
