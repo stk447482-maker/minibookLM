@@ -177,20 +177,34 @@ class LLMService {
       // プロキシが動いていない場合は直接接続へ
     }
 
-    // 2. 直接アクセス試行
+    // 2. 直接アクセス試行 (ヘッダーを付与しない単純GETで OPTIONS プリフライトを完全回避)
     try {
       let clean = endpoint.replace(/\/+$/, '');
       if (clean.endsWith('/chat/completions')) clean = clean.replace(/\/chat\/completions$/, '');
-      if (!clean.endsWith('/v1')) clean = `${clean}/v1`;
+      
+      const endpointsToTry = [];
+      if (clean.endsWith('/v1')) {
+        endpointsToTry.push(`${clean}/models`);
+        endpointsToTry.push(clean.replace(/\/v1$/, '/api/v1/models'));
+      } else {
+        endpointsToTry.push(`${clean}/v1/models`);
+        endpointsToTry.push(`${clean}/api/v1/models`);
+      }
 
-      const res = await fetch(`${clean}/models`, {
-        method: 'GET',
-        headers: { 'Authorization': 'Bearer lm-studio' },
-        signal: AbortSignal.timeout(3000)
-      });
-      if (!res.ok) return [];
-      const data = await res.json();
-      return (data.data || []).map((m: any) => m.id).filter(Boolean);
+      for (const url of endpointsToTry) {
+        try {
+          const res = await fetch(url, {
+            method: 'GET',
+            signal: AbortSignal.timeout(3000)
+          });
+          if (res.ok) {
+            const data = await res.json();
+            const list = (data.data || []).map((m: any) => m.id).filter(Boolean);
+            if (list.length > 0) return list;
+          }
+        } catch {}
+      }
+      return [];
     } catch {
       return [];
     }
@@ -256,8 +270,7 @@ class LLMService {
       res = await fetch(cleanEndpoint, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer lm-studio'
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           model: targetModel,
