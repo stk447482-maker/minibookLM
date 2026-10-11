@@ -211,13 +211,56 @@ class RAGManager {
     file: File,
     onProgress?: (status: string, percent?: number) => void,
     options?: {
-      enginePreference?: 'auto' | 'gemini' | 'kotoba-whisper' | 'whisper-local';
+      enginePreference?: 'auto' | 'gemini' | 'kotoba-whisper' | 'whisper-local' | 'native-kotoba' | 'native-large-v3';
       cloudApiKey?: string;
       abortSignal?: AbortSignal;
       modelConfig?: ModelConfig;
     }
   ): Promise<string> {
     onProgress?.('音声データを読み込み・デコード中...', 10);
+
+    // 🖥️ 1. デスクトップ Native C++ Whisper パイプライン (server.py が起動している場合は最優先試行)
+    const preferNative = options?.enginePreference === 'native-kotoba' || options?.enginePreference === 'native-large-v3' || options?.enginePreference === 'auto' || !options?.enginePreference;
+    if (preferNative) {
+      const serverEndpoint = options?.modelConfig?.desktopApiEndpoint || 'http://127.0.0.1:11434';
+      try {
+        const statusRes = await fetch(`${serverEndpoint}/api/transcribe/status`, { method: 'GET', signal: AbortSignal.timeout(2000) });
+        if (statusRes.ok) {
+          const modelParam = options?.enginePreference === 'native-large-v3' ? 'large-v3' : 'kotoba';
+          const modelLabel = modelParam === 'large-v3' ? 'Whisper Large-v3 (FP16 Native)' : 'Kotoba-Whisper v2.0 (C++ Native)';
+          onProgress?.(`🚀 本番C++ネイティブエンジン (${modelLabel}) で高速文字起こし中...`, 30);
+
+          const formData = new FormData();
+          formData.append('file', file);
+          formData.append('model', modelParam);
+          formData.append('refine_with_lmstudio', options?.modelConfig?.enableAudioContextRefiner ? 'true' : 'false');
+          formData.append('lmstudio_endpoint', options?.modelConfig?.lmStudioEndpoint || 'http://localhost:1234/v1');
+
+          const transRes = await fetch(`${serverEndpoint}/api/transcribe`, {
+            method: 'POST',
+            body: formData,
+            signal: options?.abortSignal
+          });
+
+          if (transRes.ok) {
+            const data = await transRes.json();
+            const transcript = data.refined_transcript || data.raw_transcript;
+            if (transcript && transcript.trim()) {
+              onProgress?.('文字起こし完了！ドキュメント登録中...', 98);
+              let resultMarkdown = `## 🎙️ 音声/動画 文字起こしデータ (${modelLabel})\n`;
+              resultMarkdown += `- **ファイル名:** ${file.name}\n`;
+              resultMarkdown += `- **解析エンジン:** ${data.model_used} (自己完結型 C++ Native / temperature:0.0)\n\n`;
+              resultMarkdown += `### 📝 文字起こし内容 (Transcript)\n\n${transcript.trim()}\n\n`;
+              onProgress?.('完了', 100);
+              return resultMarkdown;
+            }
+          }
+        }
+      } catch (nativeErr) {
+        // server.py が動いていない場合は自動的にブラウザ/クラウドモードへシームレスにフォールバック
+        console.warn('Native Whisper endpoint unavailable, falling back to Web/Cloud pipeline:', nativeErr);
+      }
+    }
 
     try {
       // 1. WAV / 音声ファイルを 16kHz モノラル Float32Array に安全デコード（メモリ上限回避）
@@ -420,7 +463,7 @@ ${combinedRaw.slice(0, 3000)}`;
     projectId: string,
     onProgress?: (percent: number, status?: string) => void,
     options?: {
-      enginePreference?: 'auto' | 'gemini' | 'kotoba-whisper' | 'whisper-local';
+      enginePreference?: 'auto' | 'gemini' | 'kotoba-whisper' | 'whisper-local' | 'native-kotoba' | 'native-large-v3';
       cloudApiKey?: string;
       abortSignal?: AbortSignal;
       modelConfig?: ModelConfig;

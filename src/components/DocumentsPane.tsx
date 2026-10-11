@@ -35,8 +35,8 @@ interface DocumentsPaneProps {
   processProgress: number;
   processStatusText?: string;
   onCancelUpload?: () => void;
-  audioEngine?: 'auto' | 'gemini' | 'kotoba-whisper' | 'whisper-local';
-  onChangeAudioEngine?: (engine: 'auto' | 'gemini' | 'kotoba-whisper' | 'whisper-local') => void;
+  audioEngine?: 'auto' | 'gemini' | 'kotoba-whisper' | 'whisper-local' | 'native-kotoba' | 'native-large-v3';
+  onChangeAudioEngine?: (engine: 'auto' | 'gemini' | 'kotoba-whisper' | 'whisper-local' | 'native-kotoba' | 'native-large-v3') => void;
 }
 
 export const DocumentsPane: React.FC<DocumentsPaneProps> = ({

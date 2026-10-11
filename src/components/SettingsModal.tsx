@@ -676,6 +676,36 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
             <button
               type="button"
+              onClick={() => onChangeConfig({ ...config, audioTranscriptionEngine: 'native-kotoba' })}
+              className={`p-2.5 rounded-lg border text-left transition-all ${
+                config.audioTranscriptionEngine === 'native-kotoba'
+                  ? 'bg-rose-950/40 border-rose-500/80 text-rose-200 shadow-sm shadow-rose-500/20'
+                  : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:border-slate-700'
+              }`}
+            >
+              <div className="text-xs font-bold text-slate-200">🔥 Kotoba-Whisper (C++ Native)</div>
+              <div className="text-[10px] text-slate-400 mt-0.5">
+                【最高峰・日本語】自己完結型 whisper-cli.exe で実行。ブラウザ制約ゼロ・超高速
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onChangeConfig({ ...config, audioTranscriptionEngine: 'native-large-v3' })}
+              className={`p-2.5 rounded-lg border text-left transition-all ${
+                config.audioTranscriptionEngine === 'native-large-v3'
+                  ? 'bg-amber-950/40 border-amber-500/80 text-amber-200 shadow-sm shadow-amber-500/20'
+                  : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:border-slate-700'
+              }`}
+            >
+              <div className="text-xs font-bold text-slate-200">👑 Whisper Large-v3 (FP16 Native)</div>
+              <div className="text-[10px] text-slate-400 mt-0.5">
+                【最高峰・多言語3GB】妥協なき最高精度フラッグシップ。PCネイティブ実行
+              </div>
+            </button>
+
+            <button
+              type="button"
               onClick={() => onChangeConfig({ ...config, audioTranscriptionEngine: 'kotoba-whisper' })}
               className={`p-2.5 rounded-lg border text-left transition-all ${
                 config.audioTranscriptionEngine === 'kotoba-whisper'
@@ -683,9 +713,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:border-slate-700'
               }`}
             >
-              <div className="text-xs font-bold text-slate-200">🇯🇵 Kotoba-Whisper v2.2 (日本語特化)</div>
+              <div className="text-xs font-bold text-slate-200">🌐 Kotoba-Whisper (WebGPU/PWA)</div>
               <div className="text-[10px] text-slate-400 mt-0.5">
-                【推奨】ReazonSpeech学習済みの最高峰日本語モデル。漢字・専門用語が極めて正確
+                サーバー不要。ブラウザ内 ONNX Runtime で完全完結動作
               </div>
             </button>
 
@@ -715,7 +745,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             >
               <div className="text-xs font-bold text-slate-200">🚀 自動最適化</div>
               <div className="text-[10px] text-slate-400 mt-0.5">
-                Gemini API設定時はGemini、未設定時はKotoba-Whisperで最善処理
+                Native環境起動時はNative、未起動時はWebGPU/Geminiで最善処理
               </div>
             </button>
 

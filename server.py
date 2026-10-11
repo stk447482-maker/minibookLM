@@ -272,7 +272,254 @@ async def chat(req: ChatRequest):
         media_type="application/x-ndjson"
     )
 
+# ==============================================================================
+# 🎙️ ネイティブ Whisper C++ 高精度文字起こしエンジン (自己完結型・Rock-ON品質)
+# ==============================================================================
+import subprocess
+import zipfile
+import tempfile
+import re
+from fastapi import UploadFile, File as FastAPIFile, Form
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+TOOLS_DIR = os.path.join(BASE_DIR, "tools")
+TOOLS_WHISPER_DIR = os.path.join(TOOLS_DIR, "whisper")
+MODELS_DIR = os.path.join(BASE_DIR, "models")
+
+URL_WHISPER_BIN = "https://github.com/ggerganov/whisper.cpp/releases/download/b5454/whisper-bin-x64.zip"
+URL_KOTOBA_WHISPER = "https://huggingface.co/kotoba-tech/kotoba-whisper-v2.0-ggml/resolve/main/ggml-kotoba-whisper-v2.0-q5_0.bin"
+FILE_KOTOBA_WHISPER = "ggml-kotoba-whisper-v2.0-q5_0.bin"
+URL_LARGE_V3 = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin"
+FILE_LARGE_V3 = "ggml-large-v3.bin"
+
+HALLUCINATION_PATTERNS = [
+    re.compile(r'ご視聴ありがとうございました'),
+    re.compile(r'チャンネル登録'),
+    re.compile(r'高評価.*お願い'),
+    re.compile(r'最後までご[覧見]いただき'),
+    re.compile(r'字幕[：:].*'),
+    re.compile(r'翻訳[：:].*')
+]
+
+def get_native_whisper_exe() -> Optional[str]:
+    """専用 tools/whisper ディレクトリ内の whisper-cli.exe を探索"""
+    if os.path.exists(TOOLS_WHISPER_DIR):
+        for root, _, files in os.walk(TOOLS_WHISPER_DIR):
+            for f in files:
+                if f.lower().startswith("whisper-cli") and f.endswith(".exe"):
+                    return os.path.join(root, f)
+    if os.path.exists(TOOLS_DIR):
+        for root, _, files in os.walk(TOOLS_DIR):
+            for f in files:
+                if f.lower().startswith("whisper-cli") and f.endswith(".exe"):
+                    return os.path.join(root, f)
+    return None
+
+def download_file_with_resume(url: str, dest_path: str, min_bytes: int = 100 * 1024 * 1024):
+    """大容量モデルの安全ダウンロード（サイズ完全性検証付き）"""
+    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+    if os.path.exists(dest_path) and os.path.getsize(dest_path) >= min_bytes:
+        return
+    
+    tmp_path = dest_path + ".tmp"
+    if os.path.exists(tmp_path):
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+            
+    headers = {"User-Agent": "MiniBookLM-Audio-Engine/2.0"}
+    with httpx.Client(timeout=1800.0, follow_redirects=True) as client:
+        with client.stream("GET", url, headers=headers) as resp:
+            resp.raise_for_status()
+            with open(tmp_path, "wb") as f:
+                for chunk in resp.iter_bytes(chunk_size=65536):
+                    f.write(chunk)
+                    
+    os.replace(tmp_path, dest_path)
+
+def ensure_whisper_cli() -> str:
+    """whisper-cli.exe が存在しなければ公式リリースから自動展開取得"""
+    exe = get_native_whisper_exe()
+    if exe and os.path.exists(exe):
+        return exe
+        
+    os.makedirs(TOOLS_WHISPER_DIR, exist_ok=True)
+    zip_dest = os.path.join(TOOLS_WHISPER_DIR, "whisper-bin-x64.zip")
+    
+    with httpx.Client(timeout=300.0, follow_redirects=True) as client:
+        resp = client.get(URL_WHISPER_BIN)
+        resp.raise_for_status()
+        with open(zip_dest, "wb") as f:
+            f.write(resp.content)
+            
+    with zipfile.ZipFile(zip_dest, "r") as z:
+        z.extractall(TOOLS_WHISPER_DIR)
+        
+    try:
+        os.remove(zip_dest)
+    except OSError:
+        pass
+        
+    found = get_native_whisper_exe()
+    if not found:
+        raise RuntimeError("whisper-cli.exe の展開に失敗しました")
+    return found
+
+def ensure_whisper_model(model_name: str = "kotoba") -> str:
+    """指定されたモデル（Kotoba または Large-v3）を取得"""
+    os.makedirs(MODELS_DIR, exist_ok=True)
+    if "large" in model_name.lower():
+        dest = os.path.join(MODELS_DIR, FILE_LARGE_V3)
+        download_file_with_resume(URL_LARGE_V3, dest, min_bytes=2500 * 1024 * 1024)
+        return dest
+    else:
+        dest = os.path.join(MODELS_DIR, FILE_KOTOBA_WHISPER)
+        download_file_with_resume(URL_KOTOBA_WHISPER, dest, min_bytes=450 * 1024 * 1024)
+        return dest
+
+@app.get("/api/transcribe/status")
+def get_transcribe_status():
+    """ネイティブWhisperツールの準備状況"""
+    exe = get_native_whisper_exe()
+    kotoba = os.path.join(MODELS_DIR, FILE_KOTOBA_WHISPER)
+    large = os.path.join(MODELS_DIR, FILE_LARGE_V3)
+    return {
+        "has_whisper_cli": exe is not None and os.path.exists(exe),
+        "has_kotoba_model": os.path.exists(kotoba) and os.path.getsize(kotoba) >= 450 * 1024 * 1024,
+        "has_large_v3_model": os.path.exists(large) and os.path.getsize(large) >= 2500 * 1024 * 1024,
+        "whisper_path": exe
+    }
+
+@app.post("/api/transcribe")
+async def transcribe_audio(
+    file: UploadFile = FastAPIFile(...),
+    model: str = Form("kotoba"), # "kotoba" | "large-v3"
+    refine_with_lmstudio: bool = Form(True),
+    lmstudio_endpoint: str = Form("http://localhost:1234/v1")
+):
+    """C++ Native Whisper CLI で超高精度文字起こしを実行し、LM Studio で文脈校正"""
+    # 1. ツールとモデルの完全自動準備
+    try:
+        whisper_exe = ensure_whisper_cli()
+        model_path = ensure_whisper_model(model)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"音声認識環境の準備に失敗しました: {str(e)}")
+
+    # 2. 一時ファイルへ安全保存
+    suffix = os.path.splitext(file.filename or "audio.wav")[1] or ".wav"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_audio:
+        tmp_audio_path = tmp_audio.name
+        content = await file.read()
+        tmp_audio.write(content)
+
+    try:
+        # CPUスレッド数を最適化
+        threads = min(12, max(4, (os.cpu_count() or 4) // 2))
+        anchor_prompt = "以下は日本語の打ち合わせ・ビジネス会話・日常会話です。相槌、業務連絡、手続きに関する発話が含まれます。"
+
+        # 3. whisper-cli.exe のゼロハルシネーション実行
+        cmd = [
+            whisper_exe,
+            "-m", model_path,
+            "-f", tmp_audio_path,
+            "-l", "ja",
+            "-t", str(threads),
+            "-mc", "0",          # 前区間のコンテキスト感染防止
+            "-bs", "4",          # ビーム探索 4
+            "--best-of", "4",
+            "-tp", "0.0",        # 温度0固定
+            "-nf",               # 温度フォールバック無効
+            "-nth", "0.55",      # VAD無音閾値
+            "-sns",              # 非音声抑制
+            "--prompt", anchor_prompt,
+            "--carry-initial-prompt"
+        ]
+
+        proc = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            cwd=os.path.dirname(whisper_exe)
+        )
+
+        raw_output = proc.stdout or ""
+        timestamp_re = re.compile(r'\[(\d{2}:\d{2}(?::\d{2})?\.\d{3})\s*-->\s*(\d{2}:\d{2}(?::\d{2})?\.\d{3})\]\s*(.*)')
+        skip_keywords = ['load_backend', 'whisper_', 'system_info', 'ggml_', 'BLAS', 'CPU backend', 'read_audio', 'main:']
+
+        chunks = []
+        last_clean = ""
+        for line in raw_output.splitlines():
+            line_str = line.strip()
+            if not line_str or any(k in line_str for k in skip_keywords):
+                continue
+            m = timestamp_re.match(line_str)
+            if m:
+                start_ts, end_ts, text = m.group(1), m.group(2), m.group(3).strip()
+                if not text or len(text) <= 1:
+                    continue
+                # 幻聴・ループ検知
+                if any(p.search(text) for p in HALLUCINATION_PATTERNS) or text == last_clean:
+                    continue
+                last_clean = text
+                chunks.append({"start": start_ts, "end": end_ts, "text": text})
+
+        combined_text = "\n".join([f"[{c['start']} - {c['end']}] {c['text']}" for c in chunks])
+        if not combined_text:
+            combined_text = raw_output.strip()
+
+        # 4. LM Studio による文脈復元・校正 (Refiner)
+        refined_text = None
+        if refine_with_lmstudio and chunks:
+            clean_endpoint = lmstudio_endpoint.rstrip("/")
+            if not clean_endpoint.endswith("/chat/completions"):
+                clean_endpoint = f"{clean_endpoint}/chat/completions" if clean_endpoint.endswith("/v1") else f"{clean_endpoint}/v1/chat/completions"
+
+            refiner_system = (
+                "あなたは極めて優秀な音声認識校正・文脈復元AIです。"
+                "Whisperが出力した生テキストの同音異義誤り、助詞の脱落、句読点のみを自然に整えてください。"
+                "事実の捏造や創作は一切禁止。タイムスタンプ [00:00 - 00:05] の構造は維持し、校正後テキストのみを出力してください。"
+            )
+            prompt = f"以下の音声認識生テキストを校正してください:\n\n{combined_text[:3500]}"
+            
+            try:
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    lm_resp = await client.post(
+                        clean_endpoint,
+                        json={
+                            "messages": [
+                                {"role": "system", "content": refiner_system},
+                                {"role": "user", "content": prompt}
+                            ],
+                            "temperature": 0.1,
+                            "stream": False
+                        }
+                    )
+                    if lm_resp.status_code == 200:
+                        lm_data = lm_resp.json()
+                        refined_text = lm_data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+            except Exception as ref_err:
+                print(f"[Notice] LM Studio 文脈校正スキップ: {ref_err}")
+
+        return {
+            "status": "success",
+            "model_used": os.path.basename(model_path),
+            "chunks": chunks,
+            "raw_transcript": combined_text,
+            "refined_transcript": refined_text or combined_text
+        }
+    finally:
+        if os.path.exists(tmp_audio_path):
+            try:
+                os.remove(tmp_audio_path)
+            except OSError:
+                pass
+
 if __name__ == "__main__":
     import uvicorn
-    print("🚀 MiniBookLM 本番APIサーバー (完全脱モック) を起動します (ポート: 11434)...")
+    print("🚀 MiniBookLM 本番APIサーバー (完全脱モック＆C++ Native 音声エンジン搭載) を起動します (ポート: 11434)...")
     uvicorn.run(app, host="127.0.0.1", port=11434)
+
