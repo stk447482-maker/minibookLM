@@ -227,12 +227,14 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
           </span>
         </div>
         <select
-          value={audioEngine || 'kotoba-whisper'}
+          value={audioEngine || 'auto'}
           onChange={(e) => onChangeAudioEngine?.(e.target.value as any)}
           className="w-full bg-slate-900 border border-purple-500/40 rounded-lg px-2.5 py-1.5 text-xs text-purple-200 focus:outline-none focus:border-purple-400 font-medium"
         >
-          <option value="kotoba-whisper">🇯🇵 Kotoba-Whisper v2.2 (日本語特化ONNX・推奨)</option>
-          <option value="auto">🚀 自動最適化 (Gemini優先 / Kotobaフォールバック)</option>
+          <option value="native-large-v3">👑 Whisper Large-v3 (FP16 Native・最高峰3GB)</option>
+          <option value="native-kotoba">🔥 Kotoba-Whisper (C++ Native・超高速)</option>
+          <option value="kotoba-whisper">🌐 Kotoba-Whisper v2.2 (WebGPU/PWA)</option>
+          <option value="auto">🚀 自動最適化 (Native優先 / WebGPUフォールバック)</option>
           <option value="gemini">☁️ Gemini 1.5 Flash (超高速クラウド / 10秒解析)</option>
           <option value="whisper-local">⚡ Whisper-Tiny (超軽量・英語/多言語)</option>
         </select>
