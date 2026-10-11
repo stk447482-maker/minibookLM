@@ -636,9 +636,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 placeholder="http://127.0.0.1:1234/v1"
                 className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-purple-500 font-mono"
               />
-              <span className="text-[10px] text-slate-500 block mt-1">
-                ※ LM Studio の「Developer / Local Server」画面でサーバーを起動してください（デフォルト: ポート 1234）
-              </span>
+              <div className="bg-purple-950/30 border border-purple-500/30 rounded-lg p-2.5 mt-2 space-y-1 text-[11px] text-slate-300">
+                <p className="font-bold text-amber-300 flex items-center gap-1">
+                  💡 初回セットアップの重要手順（ブラウザ通信許可）:
+                </p>
+                <ol className="list-decimal list-inside space-y-0.5 text-[10px] text-slate-300 leading-relaxed">
+                  <li>LM Studioの左側メニューから <strong className="text-purple-300">&lt;-&gt;（Developer / Local Server）</strong> タブを開きます。</li>
+                  <li>右側設定にある <strong className="text-amber-300">「Enable CORS」に必ずチェック</strong> を入れてください（ブラウザ通信に必須）。</li>
+                  <li>モデルをロードし、<strong className="text-emerald-300">「Start Server」</strong>（緑ボタン）を押して起動します。</li>
+                  <li>上の「接続テスト＆モデル取得」を押すと、ロード中モデルが自動検出されます。</li>
+                </ol>
+              </div>
             </div>
 
             <div>
