@@ -161,6 +161,83 @@ class LLMService {
     }
   }
 
+  // 2.5 LM Studio / OpenAI 互換 API へのストリーミング (http://localhost:1234/v1/chat/completions)
+  private async *streamOpenAICompatible(
+    endpoint: string,
+    model: string,
+    messages: { role: 'system' | 'user' | 'assistant'; content: string }[],
+    temperature: number = 0.3,
+    abortSignal?: AbortSignal
+  ): AsyncIterable<string> {
+    let cleanEndpoint = endpoint.replace(/\/+$/, '');
+    if (!cleanEndpoint.endsWith('/chat/completions')) {
+      if (cleanEndpoint.endsWith('/v1')) {
+        cleanEndpoint = `${cleanEndpoint}/chat/completions`;
+      } else {
+        cleanEndpoint = `${cleanEndpoint}/v1/chat/completions`;
+      }
+    }
+
+    const res = await fetch(cleanEndpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer lm-studio'
+      },
+      body: JSON.stringify({
+        model: model || 'default',
+        messages,
+        temperature,
+        stream: true
+      }),
+      signal: abortSignal
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`LM Studio / OpenAI API エラー (${res.status}): ${errText}`);
+    }
+
+    const reader = res.body?.getReader();
+    if (!reader) throw new Error('ReadableStreamを利用できません');
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      if (abortSignal?.aborted) break;
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (abortSignal?.aborted) break;
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith(':')) continue;
+
+        if (trimmed === 'data: [DONE]') {
+          return;
+        }
+
+        if (trimmed.startsWith('data: ')) {
+          try {
+            const jsonStr = trimmed.slice(6);
+            const data = JSON.parse(jsonStr);
+            const content = data.choices?.[0]?.delta?.content;
+            if (content) {
+              yield content;
+            }
+          } catch {
+            // パースエラーは無視して継続
+          }
+        }
+      }
+    }
+  }
+
   // 3. メイン・ストリーミングディスパッチャー（完全脱モック＆自律フォールバック）
   public async *streamChat(
     messages: { role: 'system' | 'user' | 'assistant'; content: string }[],
@@ -168,6 +245,19 @@ class LLMService {
     onInitProgress?: (text: string) => void,
     abortSignal?: AbortSignal
   ): AsyncIterable<string> {
+    // 🎛️ LM Studio / OpenAI 互換モード
+    if (config.mode === 'lmstudio') {
+      const endpoint = config.lmStudioEndpoint || 'http://localhost:1234/v1';
+      const model = config.desktopModelName || '';
+      try {
+        yield* this.streamOpenAICompatible(endpoint, model, messages, config.temperature, abortSignal);
+        return;
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        throw new Error(`LM Studio (${endpoint}) への接続に失敗しました: ${msg}。\nLM Studio の「Local Server」がポート 1234 等で起動しているかご確認ください。`);
+      }
+    }
+
     // ☁️ クラウド Gemini API モード（またはAPIキー設定時）
     if (config.mode === 'cloud-gemini' || config.cloudApiKey) {
       if (!config.cloudApiKey) {

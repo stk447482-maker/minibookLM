@@ -3,10 +3,20 @@
 // [Status] Pass (Harness env checked).
 
 import * as pdfjsLib from 'pdfjs-dist';
-import { DocumentChunk, DocumentSource, SourceReference, FactSkeleton } from '../types/index.ts';
+import { DocumentChunk, DocumentSource, SourceReference, FactSkeleton, ModelConfig } from '../types/index.ts';
 import { dbService } from './db.ts';
 import { decodeAudioTo16kMono, createWavBlobFromFloat32 } from './audioDecoder.ts';
 import { llmService } from './llmService.ts';
+
+const REFINER_SYSTEM_PROMPT = `あなたは極めて厳格で優秀な音声認識校正・文脈復元AIです。
+GeminiやNotebookLMのように、音声認識（Whisper）が出力した生テキストの同音異義誤り、助詞の脱落、句読点の欠損を前後の文脈から修復してください。
+
+【絶対遵守ルール】
+1. 事実の追加や推測・創作は一切禁止（ハルシネーション厳禁）。
+2. 元の発話で喋っていない内容や、新しい話題を勝手に補足してはいけません。
+3. 同音異義語の誤変換（例: 「義側」->「ギプス側」や「こちら側」、「手払う」->「手で払う / 負担する」等）、助詞の脱落（「が」「を」「に」）、自然な句読点（、。）の補正のみを行ってください。
+4. 話者が発言した意味とニュアンスを100%忠実に保ち、余計な敬語化や過度な意訳は避けてください。
+5. 出力は校正後のテキストのみを出力してください。「以下が校正文です」等の挨拶や解説は一切不要です。`;
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
 
@@ -204,6 +214,7 @@ class RAGManager {
       enginePreference?: 'auto' | 'gemini' | 'kotoba-whisper' | 'whisper-local';
       cloudApiKey?: string;
       abortSignal?: AbortSignal;
+      modelConfig?: ModelConfig;
     }
   ): Promise<string> {
     onProgress?.('音声データを読み込み・デコード中...', 10);
@@ -321,14 +332,9 @@ class RAGManager {
         }, [bufferCopy]);
       });
 
-      onProgress?.('文字起こし完了！ドキュメント登録中...', 98);
+      onProgress?.('文字起こし完了！ドキュメント登録中...', 96);
 
-      let transcribedText = `## 🎙️ 音声/動画 文字起こしデータ (${engineLabel})\n`;
-      transcribedText += `- **ファイル名:** ${file.name}\n`;
-      transcribedText += `- **再生時間:** ${durationStr}\n`;
-      transcribedText += `- **解析エンジン:** ${engineLabel} (完全端末内・外部通信なし / VAD無音カット)\n\n`;
-      transcribedText += `### 📝 文字起こし内容 (Transcript)\n\n`;
-
+      let rawTranscriptChunks: { timeLabel: string; text: string }[] = [];
       if (transcriptionResult.chunks && transcriptionResult.chunks.length > 0) {
         for (const chunk of transcriptionResult.chunks) {
           const s = Math.floor(chunk.timestamp[0] || 0);
@@ -340,8 +346,60 @@ class RAGManager {
           const timeLabel = `[${String(sMin).padStart(2, '0')}:${String(sSec).padStart(2, '0')} - ${String(eMin).padStart(2, '0')}:${String(eSec).padStart(2, '0')}]`;
           const chunkText = (chunk.text || '').trim();
           if (chunkText) {
-            transcribedText += `#### ${timeLabel}\n${chunkText}\n\n`;
+            rawTranscriptChunks.push({ timeLabel, text: chunkText });
           }
+        }
+      }
+
+      // 🎯 Rock-ON式: LLMによる事後文脈復元・校正 (Context Refiner)
+      if (options?.modelConfig?.enableAudioContextRefiner && rawTranscriptChunks.length > 0) {
+        onProgress?.('🪄 LLMによる文脈復元・同音異義語校正中...', 97);
+        try {
+          const combinedRaw = rawTranscriptChunks.map(c => `${c.timeLabel} ${c.text}`).join('\n');
+          const prompt = `以下の【音声認識生テキスト】を、文脈に沿って正しい日本語へ校正してください。
+元の発話の意味や事実関係は一切変えず、同音異義語・助詞の欠落・句読点のみを自然に整えてください。
+タイムスタンプ [00:00 - 00:05] の構造は維持し、解説は一切不要です。校正後のテキストのみを出力してください。
+
+【音声認識生テキスト】:
+${combinedRaw.slice(0, 3000)}`;
+
+          let refinedText = '';
+          for await (const chunk of llmService.streamChat(
+            [
+              { role: 'system', content: REFINER_SYSTEM_PROMPT },
+              { role: 'user', content: prompt }
+            ],
+            options.modelConfig,
+            undefined,
+            options.abortSignal
+          )) {
+            refinedText += chunk;
+          }
+
+          if (refinedText && refinedText.length > combinedRaw.length * 0.4) {
+            let transcribedText = `## 🎙️ 音声/動画 文字起こしデータ (${engineLabel} + 🪄文脈校正済)\n`;
+            transcribedText += `- **ファイル名:** ${file.name}\n`;
+            transcribedText += `- **再生時間:** ${durationStr}\n`;
+            transcribedText += `- **解析エンジン:** ${engineLabel} (文脈復元: ${options.modelConfig.mode})\n\n`;
+            transcribedText += `### 📝 校正済 文字起こし内容 (Refined Transcript)\n\n`;
+            transcribedText += `${refinedText.trim()}\n\n`;
+            onProgress?.('完了', 100);
+            return transcribedText;
+          }
+        } catch (refineErr) {
+          console.warn('Context Refiner failed, falling back to raw transcript:', refineErr);
+        }
+      }
+
+      let transcribedText = `## 🎙️ 音声/動画 文字起こしデータ (${engineLabel})\n`;
+      transcribedText += `- **ファイル名:** ${file.name}\n`;
+      transcribedText += `- **再生時間:** ${durationStr}\n`;
+      transcribedText += `- **解析エンジン:** ${engineLabel} (完全端末内・外部通信なし / VAD無音カット)\n\n`;
+      transcribedText += `### 📝 文字起こし内容 (Transcript)\n\n`;
+
+      if (rawTranscriptChunks.length > 0) {
+        for (const item of rawTranscriptChunks) {
+          transcribedText += `#### ${item.timeLabel}\n${item.text}\n\n`;
         }
       } else if (transcriptionResult.text && transcriptionResult.text.trim()) {
         transcribedText += `${transcriptionResult.text.trim()}\n\n`;
@@ -365,6 +423,7 @@ class RAGManager {
       enginePreference?: 'auto' | 'gemini' | 'kotoba-whisper' | 'whisper-local';
       cloudApiKey?: string;
       abortSignal?: AbortSignal;
+      modelConfig?: ModelConfig;
     }
   ): Promise<{ doc: DocumentSource; chunks: DocumentChunk[] }> {
     let content = '';

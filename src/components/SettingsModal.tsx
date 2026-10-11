@@ -270,6 +270,35 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           </div>
 
+          {/* 🎛️ LM Studio / OpenAI 互換 (ローカルAPI) */}
+          <div
+            onClick={() => handleModeSelect('lmstudio')}
+            className={`p-3.5 rounded-xl border cursor-pointer transition-all ${
+              config.mode === 'lmstudio'
+                ? 'bg-purple-600/10 border-purple-500 shadow-md shadow-purple-500/10'
+                : 'bg-slate-800/40 border-slate-700/60 hover:border-slate-600'
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="p-2 rounded-lg bg-purple-500/10 text-purple-400">
+                  <Database className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-bold text-slate-200">🎛️ LM Studio (OpenAI互換 ローカル推論)</h3>
+                  <p className="text-[11px] text-slate-400">
+                    LM Studioのローカルサーバー経由で高速推論 (Qwen, Llama, DeepSeek等)
+                  </p>
+                </div>
+              </div>
+              {config.mode === 'lmstudio' && (
+                <div className="w-4 h-4 rounded-full bg-purple-500 flex items-center justify-center">
+                  <Check className="w-3 h-3 text-white" />
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* 📱 携帯端末・WebGPU (WebLLM) */}
           <div
             onClick={() => handleModeSelect('embedded-mobile')}
@@ -520,11 +549,54 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
 
             {scanError && (
-
               <p className="text-xs text-amber-400 bg-amber-500/10 border border-amber-500/30 p-2 rounded-lg">
                 ⚠️ {scanError}
               </p>
             )}
+          </div>
+        )}
+
+        {/* 🎛️ LM Studio 詳細設定 */}
+        {config.mode === 'lmstudio' && (
+          <div className="bg-slate-950/80 p-4 rounded-xl border border-purple-500/40 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Database className="w-4 h-4 text-purple-400" />
+                <h4 className="text-xs font-bold text-slate-200">LM Studio 接続設定</h4>
+              </div>
+              <span className="text-[10px] bg-purple-500/10 text-purple-300 border border-purple-500/30 px-2 py-0.5 rounded font-mono">
+                OpenAI互換 (v1)
+              </span>
+            </div>
+
+            <div>
+              <label className="text-[10px] text-slate-400 block mb-1">
+                LM Studio ローカルサーバーURL
+              </label>
+              <input
+                type="text"
+                value={config.lmStudioEndpoint || 'http://localhost:1234/v1'}
+                onChange={(e) => onChangeConfig({ ...config, lmStudioEndpoint: e.target.value })}
+                placeholder="http://localhost:1234/v1"
+                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-purple-500 font-mono"
+              />
+              <span className="text-[10px] text-slate-500 block mt-1">
+                ※ LM Studio の「Developer / Local Server」画面でサーバーを起動してください（デフォルト: ポート 1234）
+              </span>
+            </div>
+
+            <div>
+              <label className="text-[10px] text-slate-400 block mb-1">
+                ロード中モデル名 (任意: 未指定の場合はLM Studioでロード中のモデルが使用されます)
+              </label>
+              <input
+                type="text"
+                value={config.desktopModelName || ''}
+                onChange={(e) => onChangeConfig({ ...config, desktopModelName: e.target.value })}
+                placeholder="例: qwen2.5-7b-instruct, deepseek-r1-distill-qwen-7b (空欄可)"
+                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-purple-500 font-mono"
+              />
+            </div>
           </div>
         )}
 
@@ -661,6 +733,28 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 英語や多言語音声向け・低スペック端末用極小モデル
               </div>
             </button>
+          </div>
+
+          {/* 🪄 Rock-ON式 文脈復元・校正 (Context Refiner) オプション */}
+          <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between">
+            <div>
+              <div className="flex items-center space-x-1.5 text-xs font-bold text-slate-200">
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                <span>🪄 LLM文脈復元・同音異義校正 (Rock-ON式 Refiner)</span>
+              </div>
+              <p className="text-[10px] text-slate-400 mt-0.5">
+                文字起こし後にLLMが助詞脱落・同音異義語・句読点を前後の文脈から自動校正（ハルシネーション抑止）
+              </p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer ml-3 shrink-0">
+              <input
+                type="checkbox"
+                checked={config.enableAudioContextRefiner === true}
+                onChange={(e) => onChangeConfig({ ...config, enableAudioContextRefiner: e.target.checked })}
+                className="sr-only peer"
+              />
+              <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-500"></div>
+            </label>
           </div>
 
           {/* APIキー入力 (Gemini利用時) */}

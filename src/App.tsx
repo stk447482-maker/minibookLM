@@ -231,7 +231,8 @@ export const App: React.FC = () => {
             {
               enginePreference: config.audioTranscriptionEngine,
               cloudApiKey: config.cloudApiKey,
-              abortSignal: uploadAbort.signal
+              abortSignal: uploadAbort.signal,
+              modelConfig: config
             }
           );
 

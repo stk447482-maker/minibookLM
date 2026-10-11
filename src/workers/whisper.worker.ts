@@ -57,11 +57,14 @@ function isSpeechActive(samples: Float32Array, sampleRate: number = 16000): bool
 
 // 🛡️ Whisper特有の定型幻覚・ループ・時間ごとの同一文字列リピート（ハレーション）検知・除去
 const KNOWN_HALLUCINATIONS = [
-  /^(ご視聴ありがとうございました|ご視聴いただきありがとうございました|ご清聴ありがとうございました|最後までご視聴.*|ご覧いただきありがとうございました)[。！!？? ]*$/i,
-  /^(チャンネル登録.*|お疲れ様でした|おやすみなさい|バイバイ|それではまた|またね)[。！!？? ]*$/i,
-  /^(Thank you.*|Subtitles by.*|MBC.*|MBC 뉴스.*|視聴者.*)[。！!？? ]*$/i,
+  /^(ご視聴ありがとうございました|ご視聴いただきありがとうございました|ご清聴ありがとうございました|最後までご[覧見]いただき.*)[。！!？? ]*$/i,
+  /^(チャンネル登録.*|高評価.*お願い.*|お疲れ様でした|おやすみなさい|バイバイ|それではまた|またね)[。！!？? ]*$/i,
+  /^(字幕[：:].*|翻訳[：:].*|Thank you.*|Subtitles by.*|MBC.*|MBC 뉴스.*|視聴者.*)[。！!？? ]*$/i,
   /^[♪\s\-—_~～・.。:：;；,，]+$/
 ];
+
+// Rock-ON式 日本語アンカープロンプト（幻聴・音響誤認識を強力に抑止）
+const JAPANESE_ANCHOR_PROMPT = "以下は日本語の打ち合わせ・ビジネス会話・日常会話です。相槌、業務連絡、手続きに関する発話が含まれます。";
 
 function cleanWhisperText(rawText: string, recentTexts: string[]): string | null {
   let text = (rawText || '').trim();
@@ -251,14 +254,17 @@ self.onmessage = async (e: MessageEvent) => {
           continue;
         }
 
-        // 🎯 2. 30秒ごとの推論を実行（repetition_penalty & no_repeat_ngram_size でループ抑制）
+        // 🎯 2. 30秒ごとの推論を実行（repetition_penalty & no_repeat_ngram_size でループ抑制、プロンプトアンカー注入）
+        const promptAnchor = language === 'japanese' || language === 'ja' ? JAPANESE_ANCHOR_PROMPT : undefined;
         const res = await transcriber(chunkAudio, {
           sampling_rate: sampleRate,
           language: language === 'auto' ? null : language,
           task: 'transcribe',
           temperature: 0.0,
           repetition_penalty: 1.25,
-          no_repeat_ngram_size: 3
+          no_repeat_ngram_size: 3,
+          prompt: promptAnchor,
+          initial_prompt: promptAnchor
         });
 
         // 🎯 3. ハルシネーション・時間ごとの同一文字列リピート検知＆除去
