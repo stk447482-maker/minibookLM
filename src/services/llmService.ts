@@ -162,8 +162,22 @@ class LLMService {
   }
 
   // 2.5 LM Studio / OpenAI 互換 API へのストリーミング (http://localhost:1234/v1/chat/completions)
-  // LM Studio / OpenAI互換サーバーからロード中モデル一覧を取得
-  public async getLMStudioModels(endpoint: string = 'http://127.0.0.1:1234/v1'): Promise<string[]> {
+  // LM Studio / OpenAI互換サーバーからロード中モデル一覧を取得（直接接続＆ローカルプロキシ両対応）
+  public async getLMStudioModels(endpoint: string = 'http://127.0.0.1:1234/v1', proxyEndpoint: string = 'http://127.0.0.1:11434'): Promise<string[]> {
+    // 1. まずローカルプロキシ (server.py) 経由を優先試行（CORS / OPTIONS 制限を完全回避）
+    try {
+      const proxyUrl = `${proxyEndpoint.replace(/\/+$/, '')}/api/lmstudio/models?endpoint=${encodeURIComponent(endpoint)}`;
+      const pRes = await fetch(proxyUrl, { method: 'GET', signal: AbortSignal.timeout(3000) });
+      if (pRes.ok) {
+        const pData = await pRes.json();
+        const list = (pData.data || []).map((m: any) => m.id).filter(Boolean);
+        if (list.length > 0) return list;
+      }
+    } catch {
+      // プロキシが動いていない場合は直接接続へ
+    }
+
+    // 2. 直接アクセス試行
     try {
       let clean = endpoint.replace(/\/+$/, '');
       if (clean.endsWith('/chat/completions')) clean = clean.replace(/\/chat\/completions$/, '');
@@ -182,13 +196,14 @@ class LLMService {
     }
   }
 
-  // 2.5 LM Studio / OpenAI 互換 API へのストリーミング (http://localhost:1234/v1/chat/completions)
+  // 2.5 LM Studio / OpenAI 互換 API へのストリーミング (直接接続 または server.py プロキシ)
   private async *streamOpenAICompatible(
     endpoint: string,
     model: string,
     messages: { role: 'system' | 'user' | 'assistant'; content: string }[],
     temperature: number = 0.3,
-    abortSignal?: AbortSignal
+    abortSignal?: AbortSignal,
+    proxyEndpoint: string = 'http://127.0.0.1:11434'
   ): AsyncIterable<string> {
     let cleanEndpoint = endpoint.replace(/\/+$/, '');
     let baseUrl = cleanEndpoint;
@@ -201,11 +216,10 @@ class LLMService {
       }
     }
 
-    // モデル名が未指定の場合、/v1/models から現在ロード中の先頭モデルを自動補完
+    // モデル名が未指定の場合、ロード中の先頭モデルを自動補完
     let targetModel = model?.trim();
     if (!targetModel) {
-      const models = await this.getLMStudioModels(baseUrl);
-      // 埋め込みモデル以外のテキスト生成モデルを優先
+      const models = await this.getLMStudioModels(baseUrl, proxyEndpoint);
       const chatModel = models.find(m => !m.includes('embedding') && !m.includes('embed')) || models[0];
       if (chatModel) {
         targetModel = chatModel;
@@ -216,20 +230,44 @@ class LLMService {
       throw new Error('LM Studio でロード中のモデルが見つかりません。LM Studio 画面でモデルをロードするか、「⚙️設定」で使用モデル名を入力してください。');
     }
 
-    const res = await fetch(cleanEndpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer lm-studio'
-      },
-      body: JSON.stringify({
-        model: targetModel,
-        messages,
-        temperature,
-        stream: true
-      }),
-      signal: abortSignal
-    });
+    // A. まずプロキシ経由を優先試行（Mixed Content & CORS 回避）
+    let res: Response | null = null;
+    try {
+      const proxyUrl = `${proxyEndpoint.replace(/\/+$/, '')}/api/lmstudio/chat`;
+      res = await fetch(proxyUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: targetModel,
+          messages,
+          customEndpoint: baseUrl,
+          options: { temperature },
+          stream: true
+        }),
+        signal: abortSignal
+      });
+      if (!res.ok) res = null;
+    } catch {
+      res = null;
+    }
+
+    // B. プロキシ未起動時は直接アクセスへフォールバック
+    if (!res) {
+      res = await fetch(cleanEndpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer lm-studio'
+        },
+        body: JSON.stringify({
+          model: targetModel,
+          messages,
+          temperature,
+          stream: true
+        }),
+        signal: abortSignal
+      });
+    }
 
     if (!res.ok) {
       const errText = await res.text();
@@ -285,10 +323,11 @@ class LLMService {
   ): AsyncIterable<string> {
     // 🎛️ LM Studio / OpenAI 互換モード
     if (config.mode === 'lmstudio') {
-      const endpoint = config.lmStudioEndpoint || 'http://localhost:1234/v1';
+      const endpoint = config.lmStudioEndpoint || 'http://127.0.0.1:1234/v1';
       const model = config.desktopModelName || '';
+      const proxy = config.desktopApiEndpoint || 'http://127.0.0.1:11434';
       try {
-        yield* this.streamOpenAICompatible(endpoint, model, messages, config.temperature, abortSignal);
+        yield* this.streamOpenAICompatible(endpoint, model, messages, config.temperature, abortSignal, proxy);
         return;
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);

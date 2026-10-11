@@ -254,22 +254,59 @@ async def stream_gemini(api_key: str, model_name: str, messages: List[dict]) -> 
             error_chunk = json.dumps({"error": f"Gemini API接続失敗: {str(e)}"}, ensure_ascii=False)
             yield error_chunk + "\n"
 
-@app.post("/api/chat")
-async def chat(req: ChatRequest):
+# ==============================================================================
+# 🎛️ LM Studio 専用プロキシ (CORS / OPTIONS 問題を完全回避)
+# ==============================================================================
+@app.get("/api/lmstudio/models")
+async def proxy_lmstudio_models(endpoint: Optional[str] = "http://127.0.0.1:1234/v1"):
+    """Pythonサーバー側から直接LM Studioにアクセスしてモデル一覧を取得"""
+    clean = endpoint.rstrip("/")
+    if clean.endswith("/chat/completions"): clean = clean.replace("/chat/completions", "")
+    if not clean.endswith("/v1"): clean = f"{clean}/v1"
+    
+    url = f"{clean}/models"
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(url, headers={"Authorization": "Bearer lm-studio"})
+            if resp.status_code == 200:
+                return resp.json()
+            return {"data": [], "error": f"LM Studio returned status {resp.status_code}"}
+    except Exception as e:
+        return {"data": [], "error": str(e)}
+
+async def stream_lmstudio_proxy(endpoint: str, model: str, messages: list, temperature: float = 0.3) -> AsyncGenerator[str, None]:
+    clean = endpoint.rstrip("/")
+    if not clean.endswith("/chat/completions"):
+        clean = f"{clean}/chat/completions" if clean.endswith("/v1") else f"{clean}/v1/chat/completions"
+
+    payload = {
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+        "stream": True
+    }
+    async with httpx.AsyncClient(timeout=180.0) as client:
+        try:
+            async with client.stream("POST", clean, json=payload, headers={"Content-Type": "application/json", "Authorization": "Bearer lm-studio"}) as resp:
+                if resp.status_code != 200:
+                    err_b = await resp.aread()
+                    yield f"data: {json.dumps({'error': f'LM Studio エラー ({resp.status_code}): {err_b.decode()}'})}\n\n"
+                    return
+                async for line in resp.aiter_lines():
+                    if not line:
+                        continue
+                    yield line + "\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'error': f'LM Studio 接続失敗: {str(e)}'})}\n\n"
+
+@app.post("/api/lmstudio/chat")
+async def proxy_lmstudio_chat(req: ChatRequest):
+    endpoint = req.customEndpoint or "http://127.0.0.1:1234/v1"
     messages_payload = [{"role": m.role, "content": m.content} for m in req.messages]
-
-    # Gemini APIプロバイダー
-    if req.provider == "gemini" and req.apiKey:
-        return StreamingResponse(
-            stream_gemini(req.apiKey, req.model or "gemini-1.5-flash", messages_payload),
-            media_type="application/x-ndjson"
-        )
-
-    # デフォルト: ローカル Ollama / Llama.cpp プロキシ
-    endpoint = req.customEndpoint or "http://127.0.0.1:11434"
+    temp = req.options.get("temperature", 0.3) if req.options else 0.3
     return StreamingResponse(
-        stream_ollama(endpoint, req.model or "llama3.1", messages_payload, req.options),
-        media_type="application/x-ndjson"
+        stream_lmstudio_proxy(endpoint, req.model or "default", messages_payload, temp),
+        media_type="text/event-stream"
     )
 
 # ==============================================================================

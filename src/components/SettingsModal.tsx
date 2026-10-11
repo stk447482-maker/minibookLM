@@ -153,7 +153,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setLmConnectionStatus('idle');
     try {
       const endpoint = config.lmStudioEndpoint || 'http://127.0.0.1:1234/v1';
-      const models = await llmService.getLMStudioModels(endpoint);
+      const proxy = config.desktopApiEndpoint || 'http://127.0.0.1:11434';
+      const models = await llmService.getLMStudioModels(endpoint, proxy);
       if (models.length > 0) {
         setLmStudioModels(models);
         setLmConnectionStatus('connected');
