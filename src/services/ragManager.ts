@@ -195,17 +195,28 @@ class RAGManager {
     return chunks;
   }
 
-  public async parsePdf(file: File): Promise<string> {
+  public async parsePdf(
+    file: File,
+    onProgress?: (percent: number, status: string) => void,
+    abortSignal?: AbortSignal
+  ): Promise<string> {
     const arrayBuffer = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
     let fullText = '';
+    const totalPages = pdf.numPages;
 
-    for (let i = 1; i <= pdf.numPages; i++) {
+    for (let i = 1; i <= totalPages; i++) {
+      if (abortSignal?.aborted) {
+        throw new Error('PDFの解析がキャンセルされました');
+      }
+
+      const percent = Math.round((i / totalPages) * 100);
+      onProgress?.(percent, `PDF解析中 (${i} / ${totalPages} ページ)`);
+
       const page = await pdf.getPage(i);
       const textContent = await page.getTextContent();
       
       // 🎯 PDFテキストの高度なレイアウト復元・行結合（Sentence & Table Stitching）
-      // Y座標の変化を検知して不自然な改行を排除し、項目名と数値を確実に同一行に結合
       let pageLines: string[] = [];
       let currentLine = '';
       let lastY: number | null = null;
@@ -218,13 +229,11 @@ class RAGManager {
         const y = transform ? transform[5] : null;
 
         if (lastY !== null && y !== null && Math.abs(y - lastY) > 5) {
-          // 改行検知
           if (currentLine.trim()) {
             pageLines.push(currentLine.trim());
           }
           currentLine = str;
         } else {
-          // 同一行内のテキスト結合
           currentLine += (currentLine.endsWith(' ') || str.startsWith(' ') ? '' : ' ') + str;
         }
         lastY = y;
@@ -241,6 +250,14 @@ class RAGManager {
         .replace(/([^\n。]+[:：])\s*\n\s*([^\n]+)/g, '$1 $2');
 
       fullText += `\n--- [Page ${i}] ---\n${reconstructedPage}`;
+
+      // 🧹 ページオブジェクトのメモリ即時解放
+      page.cleanup();
+
+      // 大容量PDFでのUIブロッキング防止（5ページ毎にマイクロタスクへ譲渡）
+      if (i % 5 === 0) {
+        await new Promise(r => setTimeout(r, 0));
+      }
     }
 
     return fullText;
@@ -642,7 +659,9 @@ ${combinedRaw.slice(0, 3000)}`;
     const ext = file.name.toLowerCase();
     if (ext.endsWith('.pdf')) {
       docType = 'pdf';
-      content = await this.parsePdf(file);
+      content = await this.parsePdf(file, (percent, status) => {
+        onProgress?.(percent, status);
+      }, options?.abortSignal);
     } else if (ext.endsWith('.mp3') || ext.endsWith('.wav') || ext.endsWith('.wma') || ext.endsWith('.m4a') || ext.endsWith('.ogg')) {
       docType = 'audio';
       content = await this.parseAudioOrVideo(file, (status, p) => {
