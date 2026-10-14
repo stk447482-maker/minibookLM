@@ -163,6 +163,61 @@ ${currentArtifact.content}
   </script>
 </body>
 </html>`;
+      } else if (currentArtifact.type === 'slide') {
+        // 🎯 自立動作可能な フルスクリーン プレゼンテーション HTML
+        const rawSlides = currentArtifact.content.split(/\n---\n/).map(s => s.trim()).filter(Boolean);
+        const actualSlides = rawSlides.filter(s => !s.startsWith('marp: true') && !s.includes('theme: gaia'));
+        const slidesToRender = actualSlides.length > 0 ? actualSlides : rawSlides;
+
+        fullHtml = `<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>${currentArtifact.title}</title>
+  <style>
+    body { margin: 0; background: #090d16; color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+    #slide-viewport { flex: 1; display: flex; align-items: center; justify-content: center; padding: 40px; }
+    .slide-card { background: #0f172a; border: 1px solid #334155; border-radius: 20px; box-shadow: 0 20px 40px rgba(0,0,0,0.6); max-width: 900px; width: 100%; aspect-ratio: 16/9; padding: 48px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: center; position: relative; }
+    h1 { color: #818cf8; margin-top: 0; font-size: 2.2rem; }
+    h2 { color: #94a3b8; font-size: 1.4rem; font-weight: normal; }
+    p, li { font-size: 1.25rem; line-height: 1.8; color: #e2e8f0; }
+    strong { color: #38bdf8; }
+    .counter { position: absolute; bottom: 20px; right: 28px; font-size: 0.9rem; color: #64748b; font-family: monospace; }
+    #nav { background: #0f172a; border-top: 1px solid #1e293b; padding: 12px 24px; display: flex; justify-content: space-between; align-items: center; }
+    button { background: #4f46e5; color: white; border: none; padding: 8px 18px; border-radius: 8px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+    button:hover { background: #4338ca; }
+    button:disabled { opacity: 0.3; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+  <div id="slide-viewport">
+    <div class="slide-card" id="slide-container"></div>
+  </div>
+  <div id="nav">
+    <button id="prevBtn" onclick="prev()">◀ 前へ (←)</button>
+    <span id="pageInfo" style="font-size: 13px; color: #94a3b8;"></span>
+    <button id="nextBtn" onclick="next()">次へ (→) ▶</button>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script>
+    const slides = ${JSON.stringify(slidesToRender.map(s => s.replace(/<!--[\s\S]*?-->/g, '')))};
+    let cur = 0;
+    function render() {
+      document.getElementById('slide-container').innerHTML = marked.parse(slides[cur]) + '<div class="counter">' + (cur + 1) + ' / ' + slides.length + '</div>';
+      document.getElementById('pageInfo').innerText = 'Slide ' + (cur + 1) + ' of ' + slides.length;
+      document.getElementById('prevBtn').disabled = cur === 0;
+      document.getElementById('nextBtn').disabled = cur === slides.length - 1;
+    }
+    function prev() { if (cur > 0) { cur--; render(); } }
+    function next() { if (cur < slides.length - 1) { cur++; render(); } }
+    window.addEventListener('keydown', e => {
+      if (e.key === 'ArrowRight' || e.key === ' ') next();
+      if (e.key === 'ArrowLeft') prev();
+    });
+    render();
+  </script>
+</body>
+</html>`;
       } else {
         // 通常MarkdownのHTML出力
         const htmlBody = marked.parse(currentArtifact.content);
@@ -505,7 +560,7 @@ ${currentArtifact.content}
               ) : activeTab === 'graph3d' ? (
                 <Graph3DViewer dataString={currentArtifact.content} />
               ) : activeTab === 'podcast' ? (
-                <PodcastPlayer script={currentArtifact.content} />
+                <PodcastPlayer script={currentArtifact.content} config={config} />
               ) : (
                 <div
                   className="prose prose-invert prose-sm max-w-none text-xs leading-relaxed"

@@ -7,27 +7,33 @@ interface SlideViewerProps {
 }
 
 export const SlideViewer: React.FC<SlideViewerProps> = ({ content }) => {
-  const slides = content.split(/\n---\n/).map(s => s.trim()).filter(Boolean);
+  // Frontmatter (--- marp: true ... ---) をスキップして実際のスライドページのみを抽出
+  const rawSections = content.split(/\n---\n/).map(s => s.trim()).filter(Boolean);
+  const slides = rawSections.filter(s => !s.startsWith('marp: true') && !s.includes('theme: gaia'));
+  const activeSlides = slides.length > 0 ? slides : rawSections;
   const [currentIndex, setCurrentIndex] = useState(0);
 
   const prevSlide = () => setCurrentIndex(prev => Math.max(0, prev - 1));
-  const nextSlide = () => setCurrentIndex(prev => Math.min(slides.length - 1, prev + 1));
+  const nextSlide = () => setCurrentIndex(prev => Math.min(activeSlides.length - 1, prev + 1));
 
-  if (slides.length === 0) {
+  if (activeSlides.length === 0) {
     return <div className="text-xs text-slate-500 p-4">スライドデータがありません</div>;
   }
+
+  // スライド内のMarpディレクティブ (<!-- _header: ... -->) を表示用にサニタイズ
+  const currentSlideHtml = marked.parse(activeSlides[currentIndex].replace(/<!--[\s\S]*?-->/g, '')) as string;
 
   return (
     <div className="flex flex-col h-full space-y-3">
       {/* スライド本体 */}
       <div className="flex-1 bg-gradient-to-br from-slate-900 to-indigo-950/40 border border-slate-700/80 rounded-2xl p-6 flex flex-col justify-center items-center shadow-lg relative overflow-hidden min-h-[280px]">
         <div className="absolute top-3 right-3 text-[10px] font-mono text-slate-400 bg-slate-800/80 px-2 py-0.5 rounded-full border border-slate-700/60">
-          {currentIndex + 1} / {slides.length}
+          {currentIndex + 1} / {activeSlides.length}
         </div>
 
         <div
           className="prose prose-invert prose-base max-w-none text-center w-full"
-          dangerouslySetInnerHTML={{ __html: marked.parse(slides[currentIndex]) as string }}
+          dangerouslySetInnerHTML={{ __html: currentSlideHtml }}
         />
       </div>
 
@@ -42,12 +48,12 @@ export const SlideViewer: React.FC<SlideViewerProps> = ({ content }) => {
         </button>
 
         <span className="text-xs text-slate-400 font-medium">
-          Slide {currentIndex + 1} of {slides.length}
+          Slide {currentIndex + 1} of {activeSlides.length}
         </span>
 
         <button
           onClick={nextSlide}
-          disabled={currentIndex === slides.length - 1}
+          disabled={currentIndex === activeSlides.length - 1}
           className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-30 text-slate-200 transition-colors"
         >
           <ChevronRight className="w-4 h-4" />
