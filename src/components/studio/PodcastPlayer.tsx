@@ -113,8 +113,11 @@ export const PodcastPlayer: React.FC<PodcastPlayerProps> = ({ script, config }) 
     }
   };
 
+  const [engineMode, setEngineMode] = useState<'google' | 'kokoro'>('google');
+  const ttsWorkerRef = useRef<Worker | null>(null);
+
   const handleReset = () => {
-    window.speechSynthesis.cancel();
+    window.speechSynthesis?.cancel();
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
@@ -123,55 +126,119 @@ export const PodcastPlayer: React.FC<PodcastPlayerProps> = ({ script, config }) 
     setCurrentLineIndex(0);
   };
 
-  // 🎯 2. 【本家NotebookLM品質】Google Neural2 音声合成パイプライン
+  // Kokoro Web Workerの初期化
+  const getTTSWorker = (): Promise<Worker> => {
+    return new Promise((resolve, reject) => {
+      if (ttsWorkerRef.current) return resolve(ttsWorkerRef.current);
+
+      try {
+        const worker = new Worker(new URL('../../workers/tts.worker.ts', import.meta.url), { type: 'module' });
+        const onInitMsg = (e: MessageEvent) => {
+          if (e.data.type === 'INIT_SUCCESS') {
+            worker.removeEventListener('message', onInitMsg);
+            ttsWorkerRef.current = worker;
+            resolve(worker);
+          } else if (e.data.type === 'INIT_ERROR') {
+            worker.removeEventListener('message', onInitMsg);
+            reject(new Error(e.data.payload.error));
+          } else if (e.data.type === 'PROGRESS') {
+            setSynthesisProgress(e.data.payload.percent || 10);
+          } else if (e.data.type === 'STATUS') {
+            setSynthesisStatus(e.data.payload.message || 'ロード中...');
+          }
+        };
+
+        worker.addEventListener('message', onInitMsg);
+        worker.postMessage({ type: 'INIT' });
+      } catch (err) {
+        reject(err);
+      }
+    });
+  };
+
+  // 🎯 2. 【本家NotebookLM品質】音声合成パイプライン (Google Neural2 または Kokoro-82M WebGPU)
   const handleGenerateNeuralPodcast = async () => {
     if (isSynthesizing || parsedLines.length === 0) return;
 
-    const apiKey = config?.cloudApiKey;
-    if (!apiKey) {
-      alert('本家NotebookLM品質のニューラル音声合成には、右上の「設定」からGemini APIキーの登録が必要です。登録すると最高品質の男声・女声対話が生成されます。');
-      return;
-    }
-
     setIsSynthesizing(true);
     setSynthesisProgress(5);
-    setSynthesisStatus('ニューラル音声合成サーバーに接続中...');
 
     try {
       const audioBuffers: Float32Array[] = [];
-      const sampleRate = 24000;
+      let sampleRate = 24000;
 
-      for (let i = 0; i < parsedLines.length; i++) {
-        const line = parsedLines[i];
-        const speakerLabel = line.isHost ? 'アレックス (ホスト)' : 'サクラ (解説)';
-        setSynthesisStatus(`[${i + 1}/${parsedLines.length}] ${speakerLabel} を音声合成中...`);
+      if (engineMode === 'kokoro') {
+        // --- ⚡ Kokoro-82M (WebGPU / 完全無料ローカル) ---
+        setSynthesisStatus('Kokoro-82M ニューラルTTSエンジンを準備中...');
+        const worker = await getTTSWorker();
 
-        // Google Cloud / Gemini TTS 呼び出し (Neural2-C vs Neural2-B)
-        const pcmBytes = await llmService.synthesizeSpeechWithGoogle(apiKey, line.text, line.isHost);
+        for (let i = 0; i < parsedLines.length; i++) {
+          const line = parsedLines[i];
+          const speakerLabel = line.isHost ? 'アレックス (ホスト)' : 'サクラ (解説)';
+          setSynthesisStatus(`[${i + 1}/${parsedLines.length}] ${speakerLabel} をローカル推論中...`);
 
-        // LINEAR16 (PCM 16-bit 24kHz) を Float32Array に変換 (先頭の44バイトWAVヘッダーをスキップ)
-        const dataOffset = pcmBytes.length > 44 && String.fromCharCode(...pcmBytes.slice(0, 4)) === 'RIFF' ? 44 : 0;
-        const pcmView = new DataView(pcmBytes.buffer, pcmBytes.byteOffset + dataOffset, pcmBytes.byteLength - dataOffset);
-        const numSamples = Math.floor(pcmView.byteLength / 2);
-        const floatSamples = new Float32Array(numSamples);
+          const voice = line.isHost ? 'am_adam' : 'af_bella';
+          const pcmData: { audioData: Float32Array; samplingRate: number } = await new Promise((resolve, reject) => {
+            const onMsg = (e: MessageEvent) => {
+              if (e.data.type === 'SYNTHESIZE_SUCCESS' && e.data.payload.id === i) {
+                worker.removeEventListener('message', onMsg);
+                resolve(e.data.payload);
+              } else if (e.data.type === 'SYNTHESIZE_ERROR' && e.data.payload.id === i) {
+                worker.removeEventListener('message', onMsg);
+                reject(new Error(e.data.payload.error));
+              }
+            };
+            worker.addEventListener('message', onMsg);
+            worker.postMessage({
+              type: 'SYNTHESIZE',
+              payload: { id: i, text: line.text, voice }
+            });
+          });
 
-        for (let s = 0; s < numSamples; s++) {
-          const int16 = pcmView.getInt16(s * 2, true);
-          floatSamples[s] = int16 / 32768.0;
+          sampleRate = pcmData.samplingRate;
+          audioBuffers.push(pcmData.audioData);
+
+          // 0.25秒のポーズ
+          const pauseSamples = Math.floor(0.25 * sampleRate);
+          audioBuffers.push(new Float32Array(pauseSamples));
+          setSynthesisProgress(10 + Math.round(((i + 1) / parsedLines.length) * 85));
+        }
+      } else {
+        // --- ☁️ Google Cloud Neural2 ---
+        const apiKey = config?.cloudApiKey;
+        if (!apiKey) {
+          alert('Google Neural2 音声合成には、右上の「設定」からGemini APIキーの登録が必要です。\n（※APIキー不要で使いたい場合は「⚡ Kokoro WebGPU」を選択してください）');
+          setIsSynthesizing(false);
+          return;
         }
 
-        audioBuffers.push(floatSamples);
+        setSynthesisStatus('Google Neural2 サーバーに接続中...');
+        for (let i = 0; i < parsedLines.length; i++) {
+          const line = parsedLines[i];
+          const speakerLabel = line.isHost ? 'アレックス (ホスト)' : 'サクラ (解説)';
+          setSynthesisStatus(`[${i + 1}/${parsedLines.length}] ${speakerLabel} を音声合成中...`);
 
-        // 発話間に 0.25 秒の自然なポーズを挿入
-        const pauseSamples = Math.floor(0.25 * sampleRate);
-        audioBuffers.push(new Float32Array(pauseSamples));
+          const pcmBytes = await llmService.synthesizeSpeechWithGoogle(apiKey, line.text, line.isHost);
+          const dataOffset = pcmBytes.length > 44 && String.fromCharCode(...pcmBytes.slice(0, 4)) === 'RIFF' ? 44 : 0;
+          const pcmView = new DataView(pcmBytes.buffer, pcmBytes.byteOffset + dataOffset, pcmBytes.byteLength - dataOffset);
+          const numSamples = Math.floor(pcmView.byteLength / 2);
+          const floatSamples = new Float32Array(numSamples);
 
-        setSynthesisProgress(5 + Math.round(((i + 1) / parsedLines.length) * 90));
+          for (let s = 0; s < numSamples; s++) {
+            const int16 = pcmView.getInt16(s * 2, true);
+            floatSamples[s] = int16 / 32768.0;
+          }
+
+          audioBuffers.push(floatSamples);
+          const pauseSamples = Math.floor(0.25 * sampleRate);
+          audioBuffers.push(new Float32Array(pauseSamples));
+
+          setSynthesisProgress(5 + Math.round(((i + 1) / parsedLines.length) * 90));
+        }
       }
 
       setSynthesisStatus('オーディオトラックを結合・マスタリング中...');
 
-      // 全セグメント結合
       const totalLen = audioBuffers.reduce((acc, c) => acc + c.length, 0);
       const combined = new Float32Array(totalLen);
       let offset = 0;
@@ -184,7 +251,6 @@ export const PodcastPlayer: React.FC<PodcastPlayerProps> = ({ script, config }) 
       const url = URL.createObjectURL(wavBlob);
       setSynthesizedAudioUrl(url);
 
-      // 自動再生開始
       setTimeout(() => {
         if (audioRef.current) {
           audioRef.current.play();
@@ -224,6 +290,36 @@ export const PodcastPlayer: React.FC<PodcastPlayerProps> = ({ script, config }) 
           </div>
 
           <div className="flex items-center space-x-2">
+            {/* エンジン切り替えタブ */}
+            {!synthesizedAudioUrl && (
+              <div className="flex items-center bg-slate-800/80 p-0.5 rounded-xl border border-slate-700 text-[10px] font-semibold">
+                <button
+                  type="button"
+                  onClick={() => setEngineMode('google')}
+                  className={`px-2 py-1 rounded-lg transition-all ${
+                    engineMode === 'google'
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                  title="Google Neural2: 最高品質・自然な対話（Gemini APIキー利用）"
+                >
+                  ☁️ Google
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEngineMode('kokoro')}
+                  className={`px-2 py-1 rounded-lg transition-all ${
+                    engineMode === 'kokoro'
+                      ? 'bg-amber-600 text-white shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                  title="Kokoro-82M: ローカルWebGPU完全無料・高速実行"
+                >
+                  ⚡ Kokoro
+                </button>
+              </div>
+            )}
+
             {!synthesizedAudioUrl ? (
               <button
                 onClick={handleGenerateNeuralPodcast}
