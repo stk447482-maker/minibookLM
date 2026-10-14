@@ -832,30 +832,51 @@ ${userRequirement}
 【参照資料】
 ${fullContext}`;
       } else if (type === 'mindmap') {
-        title = customPrompt ? `マインドマップ: ${customPrompt.slice(0, 15)}...` : 'マインドマップ';
-        prompt = `以下の資料の中心テーマと階層構造を抽出してください。JSON形式または箇条書きMarkdownで出力してください:
+        title = customPrompt ? `マインドマップ: ${customPrompt.slice(0, 15)}...` : '詳細マインドマップ';
+        prompt = `以下の資料の構造と本質的な知見を網羅的に分析し、多階層（3〜4層）で緻密なマインドマップJSONを作成してください。
+大雑把な要約ではなく、具体的なキーワード、数値、規定条項、メリット/デメリット、対策を深掘りして枝分かれさせてください。
+必ず以下のJSON形式のみを出力してください:
 \`\`\`json
 {
   "root": "中心テーマ",
   "branches": [
-    {"name": "主要項目1", "items": ["詳細1", "詳細2"]},
-    {"name": "主要項目2", "items": ["詳細1", "詳細2"]}
+    {
+      "name": "主要カテゴリ1",
+      "items": [
+        "具体項目1 (仕様や数値)",
+        "具体項目2 (留意点や課題)",
+        "具体項目3 (解決策・手順)"
+      ]
+    },
+    {
+      "name": "主要カテゴリ2",
+      "items": [
+        "詳細事項A",
+        "詳細事項B",
+        "詳細事項C"
+      ]
+    }
   ]
 }
 \`\`\`
+※ branchesは4〜6個、各itemsには3〜5個の詳細を具体的に記述してください。
 ${userRequirement}
 
 【参照資料】
 ${fullContext}`;
       } else if (type === 'flowchart') {
-        title = customPrompt ? `フローチャート: ${customPrompt.slice(0, 15)}...` : '業務処理フローチャート';
-        prompt = `以下の資料の手順や業務フローを抽出してください。JSON形式または箇条書きで出力してください:
+        title = customPrompt ? `フローチャート: ${customPrompt.slice(0, 15)}...` : '実務プロセス・判断フローチャート';
+        prompt = `以下の資料から、業務フロー・判断ロジック・手順を詳細に抽出し、条件分岐を含む実践的なフローチャートJSONを作成してください。
+単純な一本道ではなく、「事前準備」「入力・申請」「要件チェック（Yes/No分岐）」「不適合時のリカバリー/差戻し」「承認・実行」「完了・記録」を含む10〜15ステップのプロセスを構成してください。
+必ず以下のJSON形式のみを出力してください:
 \`\`\`json
 {
   "steps": [
-    {"action": "開始・受付"},
-    {"action": "審査・条件確認", "condition": true, "yes": "承認", "no": "差戻し"},
-    {"action": "完了"}
+    {"action": "業務開始・資料準備"},
+    {"action": "要件確認・入力チェック", "condition": true, "yes": "基準クリア", "no": "不備修正・再提出"},
+    {"action": "詳細審査・合否判定", "condition": true, "yes": "承認", "no": "棄却・通知"},
+    {"action": "システム本登録・実行"},
+    {"action": "完了報告・履歴保存"}
   ]
 }
 \`\`\`
@@ -864,16 +885,23 @@ ${userRequirement}
 【参照資料】
 ${fullContext}`;
       } else if (type === 'graph3d') {
-        title = customPrompt ? `3Dグラフ: ${customPrompt.slice(0, 15)}...` : '3D ナレッジグラフデータ';
-        prompt = `以下の資料から主要概念ノードと関係性リンクを抽出し、以下のJSON形式のみで出力してください:
+        title = customPrompt ? `3Dグラフ: ${customPrompt.slice(0, 15)}...` : '3D ナレッジグラフ';
+        prompt = `以下の資料群から、登場する重要概念、人物、組織、技術、規定、数値、課題などの【エンティティ】と、その相互関係を網羅的に抽出し、高密度な3DナレッジグラフJSONを作成してください。
+大雑把な数個のノードではなく、最低でも15〜25個のノードと、それらを結ぶ意味のある関係性リンク（「依存する」「規定する」「改善する」「対立する」「構成する」等）を網羅してください。
+必ず以下のJSON形式のみを出力してください:
 \`\`\`json
 {
   "nodes": [
-    {"id": "1", "name": "概念A", "val": 15, "color": "#6366f1"},
-    {"id": "2", "name": "概念B", "val": 10, "color": "#10b981"}
+    {"id": "1", "name": "中心概念", "val": 20, "color": "#6366f1"},
+    {"id": "2", "name": "主要要素A", "val": 14, "color": "#10b981"},
+    {"id": "3", "name": "主要要素B", "val": 14, "color": "#38bdf8"},
+    {"id": "4", "name": "具体的規則・数値", "val": 10, "color": "#f59e0b"},
+    {"id": "5", "name": "課題・リスク", "val": 10, "color": "#f43f5e"}
   ],
   "links": [
-    {"source": "1", "target": "2", "label": "関連"}
+    {"source": "1", "target": "2", "label": "構成要素"},
+    {"source": "2", "target": "4", "label": "適用基準"},
+    {"source": "1", "target": "5", "label": "想定リスク"}
   ]
 }
 \`\`\`

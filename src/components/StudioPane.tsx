@@ -96,8 +96,77 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     let filename = `${currentArtifact.title}_${Date.now()}`;
 
     if (format === 'html') {
-      const htmlBody = marked.parse(currentArtifact.content);
-      const fullHtml = `<!DOCTYPE html>
+      let fullHtml = '';
+
+      if (currentArtifact.type === 'mindmap' || currentArtifact.type === 'flowchart') {
+        // 🎯 自立動作可能な Mermaid ビューワー HTML
+        fullHtml = `<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>${currentArtifact.title}</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 24px; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+    h1 { color: #818cf8; font-size: 20px; border-bottom: 1px solid #334155; padding-bottom: 12px; width: 100%; max-width: 1000px; }
+    .mermaid { width: 100%; max-width: 1100px; background: #1e293b; padding: 24px; border-radius: 16px; border: 1px solid #334155; box-shadow: 0 10px 25px rgba(0,0,0,0.5); overflow-x: auto; text-align: center; }
+  </style>
+</head>
+<body>
+  <h1>📊 ${currentArtifact.title}</h1>
+  <div class="mermaid">
+${currentArtifact.content}
+  </div>
+  <script>
+    mermaid.initialize({ startOnLoad: true, theme: 'dark', securityLevel: 'loose' });
+  </script>
+</body>
+</html>`;
+      } else if (currentArtifact.type === 'graph3d') {
+        // 🎯 自立動作可能な 3D ナレッジグラフ HTML (3d-force-graph CDN)
+        fullHtml = `<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>${currentArtifact.title}</title>
+  <script src="https://unpkg.com/3d-force-graph"></script>
+  <style>
+    body { margin: 0; background: #020617; color: #f8fafc; font-family: sans-serif; overflow: hidden; }
+    #header { position: absolute; top: 16px; left: 16px; z-index: 10; background: rgba(15,23,42,0.85); padding: 12px 18px; border-radius: 12px; border: 1px solid #334155; backdrop-filter: blur(8px); }
+    h1 { margin: 0; font-size: 16px; color: #818cf8; }
+    p { margin: 4px 0 0 0; font-size: 11px; color: #94a3b8; }
+  </style>
+</head>
+<body>
+  <div id="header">
+    <h1>🌐 ${currentArtifact.title}</h1>
+    <p>マウスドラッグで3D回転・ホイールでズーム・ノードクリックでフォーカス</p>
+  </div>
+  <div id="3d-graph"></div>
+  <script>
+    try {
+      let rawData = ${JSON.stringify(currentArtifact.content)};
+      let gData = typeof rawData === 'string' ? JSON.parse(rawData.replace(/\`\`\`json/g, '').replace(/\`\`\`/g, '').trim()) : rawData;
+      
+      const Graph = ForceGraph3D()(document.getElementById('3d-graph'))
+        .graphData(gData)
+        .nodeLabel(node => node.name || node.id)
+        .nodeColor(node => node.color || '#6366f1')
+        .nodeVal(node => node.val || 10)
+        .linkLabel(link => link.label || '')
+        .linkDirectionalParticles(2)
+        .linkDirectionalParticleSpeed(0.006)
+        .backgroundColor('#020617');
+    } catch(e) {
+      document.body.innerHTML = '<p style="color:red;padding:20px;">3Dグラフデータの読み込みに失敗しました: ' + e.message + '</p>';
+    }
+  </script>
+</body>
+</html>`;
+      } else {
+        // 通常MarkdownのHTML出力
+        const htmlBody = marked.parse(currentArtifact.content);
+        fullHtml = `<!DOCTYPE html>
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
@@ -114,6 +183,8 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
   ${htmlBody}
 </body>
 </html>`;
+      }
+
       blob = new Blob([fullHtml], { type: 'text/html;charset=utf-8;' });
       filename += '.html';
     } else {

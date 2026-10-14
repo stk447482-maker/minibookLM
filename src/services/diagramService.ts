@@ -137,7 +137,7 @@ export class DiagramService {
       }
 
       let flowchart = `flowchart TD\n`;
-      lines.slice(0, 8).forEach((line, idx) => {
+      lines.slice(0, 20).forEach((line, idx) => {
         const id = `node${idx + 1}`;
         flowchart += `  ${id}["${line}"]\n`;
         if (idx > 0) {
@@ -152,7 +152,7 @@ export class DiagramService {
     let flowchart = `flowchart TD\n`;
 
     if (Array.isArray(steps) && steps.length > 0) {
-      steps.slice(0, 10).forEach((st: any, idx: number) => {
+      steps.slice(0, 25).forEach((st: any, idx: number) => {
         const id = `step_${idx + 1}`;
         const label = this.escapeLabel(st.action || st.name || st.text || st.step || `ステップ ${idx + 1}`);
 
