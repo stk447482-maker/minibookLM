@@ -143,12 +143,17 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                   </div>
                 )}
 
-                {/* 本文 (Markdown対応) */}
+                {/* 本文 (Markdown対応 & インライン引用バッジ対応) */}
                 <div
                   className={`prose prose-sm max-w-none leading-relaxed ${
                     msg.role === 'user' ? 'text-white [&_*]:!text-white' : 'prose-invert text-slate-200'
                   }`}
-                  dangerouslySetInnerHTML={{ __html: marked.parse(msg.content) as string }}
+                  dangerouslySetInnerHTML={{
+                    __html: (marked.parse(msg.content) as string).replace(
+                      /\[(\d+)\]/g,
+                      '<span class="inline-flex items-center justify-center px-1.5 py-0.2 mx-0.5 text-[10px] font-bold font-mono bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 rounded cursor-pointer hover:bg-indigo-500 hover:text-white transition-all shadow-sm" title="根拠ソース [$1] を参照">[$1]</span>'
+                    )
+                  }}
                 />
 
                 {/* アクションフッター (ソース追加・削除) */}

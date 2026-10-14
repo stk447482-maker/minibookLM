@@ -17,7 +17,10 @@ import {
   PlusCircle,
   Zap,
   Info,
-  RotateCcw
+  RotateCcw,
+  Edit3,
+  Check,
+  X
 } from 'lucide-react';
 import { marked } from 'marked';
 import { StudioTab, StudioArtifact, ModelConfig } from '../types/index.ts';
@@ -35,6 +38,7 @@ interface StudioPaneProps {
   onCancel?: () => void;
   onDeleteArtifact: (id: string) => void;
   onAddToSource: (title: string, content: string) => void;
+  onUpdateArtifact?: (id: string, updatedContent: string, updatedTitle?: string) => void;
   isGeneratingStudio: boolean;
 }
 
@@ -47,11 +51,15 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
   onCancel,
   onDeleteArtifact,
   onAddToSource,
+  onUpdateArtifact,
   isGeneratingStudio
 }) => {
   const [activeTab, setActiveTab] = useState<StudioTab>('briefing');
   const [customPrompt, setCustomPrompt] = useState('');
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editContent, setEditContent] = useState('');
+  const [editTitle, setEditTitle] = useState('');
 
   const tabs: { id: StudioTab; label: string; desc: string; icon: React.ReactNode }[] = [
     { id: 'briefing', label: '要約', desc: '主要な論点・決定事項をまとめたエグゼクティブサマリ', icon: <FileText className="w-3.5 h-3.5" /> },
@@ -315,55 +323,111 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
               </div>
 
               <div className="flex items-center space-x-1 shrink-0">
-                <button
-                  onClick={() => onGenerate(activeTab, currentArtifact.customPrompt)}
-                  disabled={isGeneratingStudio}
-                  className="p-1 hover:bg-slate-800 text-slate-400 hover:text-amber-300 rounded transition-colors text-[10px] flex items-center space-x-0.5 border border-slate-700/60"
-                  title="この成果物を再生成します"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">再生成</span>
-                </button>
-                <button
-                  onClick={() => onAddToSource(`[Studio] ${currentArtifact.title}`, currentArtifact.content)}
-                  className="p-1 hover:bg-slate-800 text-indigo-400 hover:text-indigo-300 rounded transition-colors text-[10px] flex items-center space-x-0.5 border border-indigo-500/20"
-                  title="この成果物を新しいソースとして追加・登録します"
-                >
-                  <PlusCircle className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">ソース追加</span>
-                </button>
-                <button
-                  onClick={() => handleExport('md')}
-                  className="p-1 hover:bg-slate-800 text-slate-400 hover:text-indigo-400 rounded transition-colors text-[10px] flex items-center space-x-0.5"
-                  title="Markdown保存"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>.MD</span>
-                </button>
-                <button
-                  onClick={() => handleExport('html')}
-                  className="p-1 hover:bg-slate-800 text-slate-400 hover:text-indigo-400 rounded transition-colors text-[10px] flex items-center space-x-0.5"
-                  title="HTML保存"
-                >
-                  <Share2 className="w-3.5 h-3.5" />
-                  <span>.HTML</span>
-                </button>
-                <button
-                  onClick={() => {
-                    if (confirm('この成果物を削除しますか？')) {
-                      onDeleteArtifact(currentArtifact.id);
-                    }
-                  }}
-                  className="p-1 hover:bg-rose-500/20 text-slate-500 hover:text-rose-400 rounded transition-colors"
-                  title="削除"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
+                {isEditing ? (
+                  <>
+                    <button
+                      onClick={() => {
+                        if (onUpdateArtifact && currentArtifact) {
+                          onUpdateArtifact(currentArtifact.id, editContent, editTitle.trim() || currentArtifact.title);
+                        }
+                        setIsEditing(false);
+                      }}
+                      className="p-1 bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-300 rounded transition-colors text-[10px] flex items-center space-x-0.5 border border-emerald-500/40"
+                      title="変更を保存"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      <span>保存</span>
+                    </button>
+                    <button
+                      onClick={() => setIsEditing(false)}
+                      className="p-1 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded transition-colors text-[10px] flex items-center space-x-0.5"
+                      title="編集をキャンセル"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                      <span>取消</span>
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => {
+                        setEditContent(currentArtifact.content);
+                        setEditTitle(currentArtifact.title);
+                        setIsEditing(true);
+                      }}
+                      className="p-1 hover:bg-slate-800 text-slate-400 hover:text-indigo-300 rounded transition-colors text-[10px] flex items-center space-x-0.5 border border-slate-700/60"
+                      title="この成果物を直接編集します"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">編集</span>
+                    </button>
+                    <button
+                      onClick={() => onGenerate(activeTab, currentArtifact.customPrompt)}
+                      disabled={isGeneratingStudio}
+                      className="p-1 hover:bg-slate-800 text-slate-400 hover:text-amber-300 rounded transition-colors text-[10px] flex items-center space-x-0.5 border border-slate-700/60"
+                      title="この成果物を再生成します"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">再生成</span>
+                    </button>
+                    <button
+                      onClick={() => onAddToSource(`[Studio] ${currentArtifact.title}`, currentArtifact.content)}
+                      className="p-1 hover:bg-slate-800 text-indigo-400 hover:text-indigo-300 rounded transition-colors text-[10px] flex items-center space-x-0.5 border border-indigo-500/20"
+                      title="この成果物を新しいソースとして追加・登録します"
+                    >
+                      <PlusCircle className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">ソース追加</span>
+                    </button>
+                    <button
+                      onClick={() => handleExport('md')}
+                      className="p-1 hover:bg-slate-800 text-slate-400 hover:text-indigo-400 rounded transition-colors text-[10px] flex items-center space-x-0.5"
+                      title="Markdown保存"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>.MD</span>
+                    </button>
+                    <button
+                      onClick={() => handleExport('html')}
+                      className="p-1 hover:bg-slate-800 text-slate-400 hover:text-indigo-400 rounded transition-colors text-[10px] flex items-center space-x-0.5"
+                      title="HTML保存"
+                    >
+                      <Share2 className="w-3.5 h-3.5" />
+                      <span>.HTML</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (confirm('この成果物を削除しますか？')) {
+                          onDeleteArtifact(currentArtifact.id);
+                        }
+                      }}
+                      className="p-1 hover:bg-rose-500/20 text-slate-500 hover:text-rose-400 rounded transition-colors"
+                      title="削除"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </>
+                )}
               </div>
             </div>
 
             <div className="flex-1 overflow-y-auto min-w-0">
-              {activeTab === 'slide' ? (
+              {isEditing ? (
+                <div className="h-full flex flex-col space-y-2">
+                  <input
+                    type="text"
+                    value={editTitle}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-slate-200 font-bold focus:outline-none focus:border-indigo-500"
+                    placeholder="タイトル"
+                  />
+                  <textarea
+                    value={editContent}
+                    onChange={(e) => setEditContent(e.target.value)}
+                    className="flex-1 w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-slate-200 font-mono focus:outline-none focus:border-indigo-500 resize-none leading-relaxed"
+                    placeholder="Markdown / ダイアグラム定義を直接編集..."
+                  />
+                </div>
+              ) : activeTab === 'slide' ? (
                 <SlideViewer content={currentArtifact.content} />
               ) : activeTab === 'mindmap' || activeTab === 'flowchart' ? (
                 <MermaidViewer chart={currentArtifact.content} />

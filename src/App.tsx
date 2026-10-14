@@ -12,6 +12,7 @@ import { llmService } from './services/llmService.ts';
 import { dbService } from './services/db.ts';
 import { securityGuard } from './services/securityGuard.ts';
 import { DiagramService } from './services/diagramService.ts';
+import { ToastContainer, ToastMessage } from './components/ToastContainer.tsx';
 
 const EXPECTED_HASH = '3c796256ccc298e53eb6c451fcff012416c8aabb41da6583c6192eecd1cae1fb';
 
@@ -88,6 +89,21 @@ export const App: React.FC = () => {
     setIsProcessingDoc(false);
     setDocProgress(0);
     setDocStatusText('');
+  };
+
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
+
+  const showToast = (type: 'success' | 'error' | 'info', message: string, title?: string, action?: { label: string; onClick: () => void }) => {
+    const id = `toast_${Date.now()}_${Math.random()}`;
+    const newToast: ToastMessage = { id, type, message, title, action };
+    setToasts(prev => [...prev, newToast]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, 4500);
+  };
+
+  const handleDismissToast = (id: string) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
   };
 
   // 1. 初回マウント時: IndexedDBからプロジェクト復元
@@ -246,7 +262,7 @@ export const App: React.FC = () => {
         } catch (err: unknown) {
           if (uploadAbort.signal.aborted) break;
           const msg = err instanceof Error ? err.message : String(err);
-          alert(`ドキュメント処理に失敗しました: ${msg}`);
+          showToast('error', `ドキュメント処理に失敗しました: ${msg}`, 'アップロード失敗');
         }
       }
 
@@ -274,10 +290,10 @@ export const App: React.FC = () => {
       setDocuments(prev => [...prev, doc]);
       const updatedChunks = await dbService.getChunksByProject(activeProject.id);
       await ragManager.loadProjectChunks(updatedChunks);
-      alert(`「${title}」をソース一覧に追加しました！`);
+      showToast('success', `「${title}」をソース一覧に追加・保存しました`, 'ソース追加完了');
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      alert(`ソース追加エラー: ${msg}`);
+      showToast('error', `ソース追加エラー: ${msg}`, '追加失敗');
     } finally {
       setIsProcessingDoc(false);
     }
@@ -542,6 +558,7 @@ ${skeleton.formattedContextForLLM}`;
 
 ### 【回答ガイドライン】
 - 冒頭で質問の核心（確定数値、仕様、要件、結論）をズバリわかりやすく明示してください。
+- 根拠とする資料箇所には、文末や該当文に [1] や [2] のように参照番号を必ず付与してください。
 - 続いて、具体的な仕様内容、背景、関連するルールや手順を、Markdown（箇条書きや強調）を活用して見やすく論理的に解説してください。
 - 関連する法令条項、前提条件、例外規定、留意事項があれば、それらも丁寧に補足してください。
 
@@ -549,23 +566,25 @@ ${skeleton.formattedContextForLLM}`;
 ${skeleton.formattedContextForLLM}
 
 【ドキュメント関連文脈抜粋】
-${searchResults.slice(0, 5).map(s => `[資料: ${s.docTitle}]\n${s.fullContext}`).join('\n\n')}`;
+${searchResults.slice(0, 5).map((s, idx) => `[${idx + 1}] 資料: ${s.docTitle}\n${s.fullContext}`).join('\n\n')}`;
       } else {
         // 【Tier 3: 7B〜8B / Gemini】多角的プロフェッショナル分析（NotebookLM級）
         systemPrompt = `あなたは最高峰のナレッジアナリストです。
 提供された資料群を網羅的・多角的に分析し、質問に対して専門的かつ実践的なインサイトを提供する充実した総合レポートを作成してください。
 
 ### 【レポート構成】
-1. **要約と結論（Key Findings）**: 質問に対する確定数値・コアメッセージの明確な提示
+1. **要約と結論（Key Findings）**: 質問に対する確定数値・コアメッセージの明確な提示（根拠文末に [1], [2] などの引用番号を付与）
 2. **詳細分析・構造化解説**: 規定・仕様・手順・背景の論理的ブレイクダウン
 3. **制約事項・リスク・例外条件**: 留意すべきルールや適用外ケースの提示
 4. **横断的考察・インサイト**: 各資料間の関係性や実務上のポイント
+
+※ 根拠とする記述には文中または文末に [1], [2] などの引用番号を積極的に付与してください。
 
 【抽出ファクト・条項】
 ${skeleton.formattedContextForLLM}
 
 【参照ドキュメント全文抜粋】
-${searchResults.map(s => `[資料: ${s.docTitle}]\n${s.fullContext}`).join('\n\n')}`;
+${searchResults.map((s, idx) => `[${idx + 1}] 資料: ${s.docTitle}\n${s.fullContext}`).join('\n\n')}`;
       }
 
       const assistantMsgId = `asst_${Date.now()}`;
@@ -929,18 +948,38 @@ ${fullContext}`;
       setStreamingStudioArtifact(null);
       setArtifacts(prev => [newArtifact, ...prev]);
       await dbService.saveArtifact(newArtifact);
+      showToast('success', `「${title}」の生成が完了しました`, 'Studio生成完了');
     } catch (err: unknown) {
       if (studioAbortControllerRef.current?.signal.aborted) {
         return;
       }
       const msg = err instanceof Error ? err.message : String(err);
-      alert(`Studio生成エラー: ${msg}`);
+      showToast('error', `Studio生成エラー: ${msg}`, '生成失敗', {
+        label: '設定を確認',
+        onClick: () => setIsSettingsOpen(true)
+      });
       setStreamingStudioArtifact(null);
     } finally {
       setIsGeneratingStudio(false);
       setStreamingStudioArtifact(null);
       studioAbortControllerRef.current = null;
     }
+  };
+
+  // Studio成果物のインライン編集・保存
+  const handleUpdateArtifact = async (id: string, updatedContent: string, updatedTitle?: string) => {
+    const target = artifacts.find(a => a.id === id);
+    if (!target) return;
+
+    const updated: StudioArtifact = {
+      ...target,
+      content: updatedContent,
+      title: updatedTitle || target.title
+    };
+
+    setArtifacts(prev => prev.map(a => a.id === id ? updated : a));
+    await dbService.saveArtifact(updated);
+    showToast('success', `「${updated.title}」の変更を保存しました`, '保存完了');
   };
 
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
@@ -1044,6 +1083,7 @@ ${fullContext}`;
             onCancel={handleCancelStudio}
             onDeleteArtifact={handleDeleteArtifact}
             onAddToSource={handleAddContentToSource}
+            onUpdateArtifact={handleUpdateArtifact}
             isGeneratingStudio={isGeneratingStudio}
           />
         </div>
@@ -1064,6 +1104,9 @@ ${fullContext}`;
         config={config}
         onChangeConfig={handleUpdateConfig}
       />
+
+      {/* 🚀 トースト通知コンテナ */}
+      <ToastContainer toasts={toasts} onDismiss={handleDismissToast} />
     </div>
   );
 };
