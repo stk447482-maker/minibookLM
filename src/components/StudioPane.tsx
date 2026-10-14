@@ -14,7 +14,6 @@ import {
   Share2,
   Trash2,
   Clock,
-  PlusCircle,
   Zap,
   Info,
   RotateCcw,
@@ -498,12 +497,12 @@ ${currentArtifact.content}
                       <span className="hidden sm:inline">再生成</span>
                     </button>
                     <button
-                      onClick={() => onAddToSource(`[Studio] ${currentArtifact.title}`, currentArtifact.content)}
-                      className="p-1 hover:bg-slate-800 text-indigo-400 hover:text-indigo-300 rounded transition-colors text-[10px] flex items-center space-x-0.5 border border-indigo-500/20"
-                      title="この成果物を新しいソースとして追加・登録します"
+                      onClick={() => onAddToSource(`[AI補助脳: ${currentArtifact.type.toUpperCase()}] ${currentArtifact.title}`, currentArtifact.content)}
+                      className="p-1 px-1.5 hover:bg-indigo-600/30 text-indigo-300 hover:text-white rounded transition-colors text-[10px] flex items-center space-x-1 border border-indigo-500/40 bg-indigo-950/40 shadow-sm"
+                      title="この生成物を知識ベース（ベクトルDB）に登録し、次回以降のAI回答の精度向上に活かします"
                     >
-                      <PlusCircle className="w-3.5 h-3.5" />
-                      <span className="hidden sm:inline">ソース追加</span>
+                      <Sparkles className="w-3.5 h-3.5 text-amber-300 fill-amber-300" />
+                      <span className="font-semibold">🧠 補助脳に登録</span>
                     </button>
                     <button
                       onClick={() => handleExport('md')}

@@ -929,11 +929,17 @@ ${combinedRaw.slice(0, 3000)}`;
       }
     }
 
-    // クエリがある場合は、関連度の高いチャンクを優先取得
+    // クエリがある場合は、関連度の高いチャンクを優先取得（🧠 AI補助脳ドキュメントは優先度ボーナス）
     let topRelevantHits: SourceReference[] = [];
     if (query && query.trim()) {
       try {
-        topRelevantHits = await this.search(query, enabledDocIds, 4);
+        const hits = await this.search(query, enabledDocIds, 6);
+        // [AI補助脳] ドキュメントのスコアを1.3倍にブーストし最上位にランク付け
+        topRelevantHits = hits.sort((a, b) => {
+          const aBoost = a.docTitle.includes('AI補助脳') ? 1.3 : 1.0;
+          const bBoost = b.docTitle.includes('AI補助脳') ? 1.3 : 1.0;
+          return (b.score * bBoost) - (a.score * aBoost);
+        }).slice(0, 4);
       } catch {}
     }
 
@@ -947,7 +953,9 @@ ${combinedRaw.slice(0, 3000)}`;
       combinedText += `### 🔍 【質問に最も関連する該当箇所抜粋】\n`;
       for (const hit of topRelevantHits) {
         if ((combinedText.length + hit.fullContext.length) < (maxChars * 0.6)) {
-          combinedText += `\n【資料: ${hit.docTitle}】\n${hit.fullContext}\n`;
+          const isBrain = hit.docTitle.includes('AI補助脳');
+          const badge = isBrain ? '🧠 【AI補助脳・過去の構造化知見】' : `【資料: ${hit.docTitle}】`;
+          combinedText += `\n${badge}\n${hit.fullContext}\n`;
           sources.push(hit);
         }
       }

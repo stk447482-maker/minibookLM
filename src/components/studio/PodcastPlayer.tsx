@@ -133,13 +133,23 @@ export const PodcastPlayer: React.FC<PodcastPlayerProps> = ({ script, config }) 
 
       try {
         const worker = new Worker(new URL('../../workers/tts.worker.ts', import.meta.url), { type: 'module' });
+        
+        // 120秒の初期化タイムアウト（初回ONNXモデルダウンロード用）
+        const timer = setTimeout(() => {
+          worker.terminate();
+          reject(new Error('Kokoro-82Mモデルの読み込みがタイムアウトしました。通信環境を確認するか「☁️ Google」モードをお試しください。'));
+        }, 120000);
+
         const onInitMsg = (e: MessageEvent) => {
           if (e.data.type === 'INIT_SUCCESS') {
+            clearTimeout(timer);
             worker.removeEventListener('message', onInitMsg);
             ttsWorkerRef.current = worker;
             resolve(worker);
           } else if (e.data.type === 'INIT_ERROR') {
+            clearTimeout(timer);
             worker.removeEventListener('message', onInitMsg);
+            worker.terminate();
             reject(new Error(e.data.payload.error));
           } else if (e.data.type === 'PROGRESS') {
             setSynthesisProgress(e.data.payload.percent || 10);
@@ -147,6 +157,12 @@ export const PodcastPlayer: React.FC<PodcastPlayerProps> = ({ script, config }) 
             setSynthesisStatus(e.data.payload.message || 'ロード中...');
           }
         };
+
+        worker.addEventListener('error', (errEvt) => {
+          clearTimeout(timer);
+          worker.removeEventListener('message', onInitMsg);
+          reject(new Error(`Web Worker起動エラー: ${errEvt.message}`));
+        });
 
         worker.addEventListener('message', onInitMsg);
         worker.postMessage({ type: 'INIT' });
@@ -177,13 +193,21 @@ export const PodcastPlayer: React.FC<PodcastPlayerProps> = ({ script, config }) 
           const speakerLabel = line.isHost ? 'アレックス (ホスト)' : 'サクラ (解説)';
           setSynthesisStatus(`[${i + 1}/${parsedLines.length}] ${speakerLabel} をローカル推論中...`);
 
-          const voice = line.isHost ? 'am_adam' : 'af_bella';
+          // Kokoro-82M v1.0 日本語ボイス: ホスト(男性)=jm_kurosu, ゲスト(女性)=jf_alpha
+          const voice = line.isHost ? 'jm_kurosu' : 'jf_alpha';
           const pcmData: { audioData: Float32Array; samplingRate: number } = await new Promise((resolve, reject) => {
+            const lineTimer = setTimeout(() => {
+              worker.removeEventListener('message', onMsg);
+              reject(new Error(`「${line.text.slice(0, 15)}...」の音声合成がタイムアウトしました`));
+            }, 60000);
+
             const onMsg = (e: MessageEvent) => {
               if (e.data.type === 'SYNTHESIZE_SUCCESS' && e.data.payload.id === i) {
+                clearTimeout(lineTimer);
                 worker.removeEventListener('message', onMsg);
                 resolve(e.data.payload);
               } else if (e.data.type === 'SYNTHESIZE_ERROR' && e.data.payload.id === i) {
+                clearTimeout(lineTimer);
                 worker.removeEventListener('message', onMsg);
                 reject(new Error(e.data.payload.error));
               }
