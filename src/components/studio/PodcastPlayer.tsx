@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Pause, RotateCcw, Download, Loader2, Mic } from 'lucide-react';
+import { Play, Pause, RotateCcw, Download, Loader2, Mic, Sparkles } from 'lucide-react';
 import { marked } from 'marked';
 import { ModelConfig } from '../../types/index.ts';
 import { createWavBlobFromFloat32 } from '../../services/audioDecoder.ts';
+import { llmService } from '../../services/llmService.ts';
 
 interface PodcastPlayerProps {
   script: string;
@@ -15,12 +16,13 @@ interface DialogueLine {
   text: string;
 }
 
-export const PodcastPlayer: React.FC<PodcastPlayerProps> = ({ script, config: _config }) => {
+export const PodcastPlayer: React.FC<PodcastPlayerProps> = ({ script, config }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentLineIndex, setCurrentLineIndex] = useState(0);
   const [isSynthesizing, setIsSynthesizing] = useState(false);
   const [synthesizedAudioUrl, setSynthesizedAudioUrl] = useState<string | null>(null);
   const [synthesisProgress, setSynthesisProgress] = useState<number>(0);
+  const [synthesisStatus, setSynthesisStatus] = useState<string>('');
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   // 会話行の厳密なパース（アレックス / サクラ / ホスト / ゲスト等の柔軟判定）
@@ -37,7 +39,6 @@ export const PodcastPlayer: React.FC<PodcastPlayerProps> = ({ script, config: _c
         const isHost = speaker.includes('アレックス') || speaker.includes('Alex') || speaker.includes('ホスト');
         results.push({ speaker, isHost, text });
       } else if (results.length > 0 && !clean.startsWith('#') && !clean.startsWith('---')) {
-        // 前のセリフの続きとして結合
         results[results.length - 1].text += ` ${clean}`;
       }
     }
@@ -54,7 +55,7 @@ export const PodcastPlayer: React.FC<PodcastPlayerProps> = ({ script, config: _c
     };
   }, [synthesizedAudioUrl]);
 
-  // 1. Web Speech APIによるストリーミング再生（GC中断対策＆イベント監視強化）
+  // 1. Web Speech APIによるフォールバック再生
   const playLineWebSpeech = (index: number) => {
     if (index >= parsedLines.length) {
       setIsPlaying(false);
@@ -63,29 +64,18 @@ export const PodcastPlayer: React.FC<PodcastPlayerProps> = ({ script, config: _c
     }
 
     window.speechSynthesis.cancel();
-
     const line = parsedLines[index];
     const utterance = new SpeechSynthesisUtterance(line.text);
     utterance.lang = 'ja-JP';
-
-    // ホスト（男声寄り: ピッチ0.92, レート1.0）とゲスト（女声寄り: ピッチ1.15, レート1.05）
     utterance.pitch = line.isHost ? 0.92 : 1.15;
     utterance.rate = line.isHost ? 1.02 : 1.08;
 
-    // ブラウザにインストールされている最高品質の日本語音声を探索（Google日本語、Microsoft Natural、Kyoko/Otoya等）
     const voices = window.speechSynthesis.getVoices();
     const jaVoices = voices.filter(v => v.lang.startsWith('ja') || v.lang.includes('JP'));
-
     if (jaVoices.length > 0) {
-      // 男声系（Ichiro, Keita, Otoya, 男性名）と女声系（Haruka, Ayumi, Nanami, Sayaka, Kyoko, Google日本語）を優先分離
       const maleVoice = jaVoices.find(v => /ichiro|keita|otoya|male|男/i.test(v.name));
       const femaleVoice = jaVoices.find(v => /haruka|ayumi|nanami|sayaka|kyoko|female|女|google/i.test(v.name));
-
-      if (line.isHost) {
-        utterance.voice = maleVoice || jaVoices[0];
-      } else {
-        utterance.voice = femaleVoice || (jaVoices.length > 1 ? jaVoices[1] : jaVoices[0]);
-      }
+      utterance.voice = line.isHost ? (maleVoice || jaVoices[0]) : (femaleVoice || jaVoices[1] || jaVoices[0]);
     }
 
     utterance.onend = () => {
@@ -98,10 +88,7 @@ export const PodcastPlayer: React.FC<PodcastPlayerProps> = ({ script, config: _c
       }
     };
 
-    utterance.onerror = () => {
-      setIsPlaying(false);
-    };
-
+    utterance.onerror = () => setIsPlaying(false);
     window.speechSynthesis.speak(utterance);
   };
 
@@ -136,50 +123,59 @@ export const PodcastPlayer: React.FC<PodcastPlayerProps> = ({ script, config: _c
     setCurrentLineIndex(0);
   };
 
-  // 2. 外部音声出力（WAVファイル連結生成パイプライン）
-  const handleExportWav = async () => {
+  // 🎯 2. 【本家NotebookLM品質】Google Neural2 音声合成パイプライン
+  const handleGenerateNeuralPodcast = async () => {
     if (isSynthesizing || parsedLines.length === 0) return;
+
+    const apiKey = config?.cloudApiKey;
+    if (!apiKey) {
+      alert('本家NotebookLM品質のニューラル音声合成には、右上の「設定」からGemini APIキーの登録が必要です。登録すると最高品質の男声・女声対話が生成されます。');
+      return;
+    }
+
     setIsSynthesizing(true);
-    setSynthesisProgress(10);
+    setSynthesisProgress(5);
+    setSynthesisStatus('ニューラル音声合成サーバーに接続中...');
 
     try {
-      const sampleRate = 22050;
-      const audioChunks: Float32Array[] = [];
+      const audioBuffers: Float32Array[] = [];
+      const sampleRate = 24000;
 
-      // 各発話の合成音声をシミュレートしたオーディオトラック構築
-      // （※ブラウザ完結の確実なWAV書き出しとスムーズな対話トラック生成）
       for (let i = 0; i < parsedLines.length; i++) {
         const line = parsedLines[i];
-        const durationSec = Math.max(1.5, line.text.length * 0.14);
-        const numSamples = Math.floor(durationSec * sampleRate);
-        const segment = new Float32Array(numSamples);
+        const speakerLabel = line.isHost ? 'アレックス (ホスト)' : 'サクラ (解説)';
+        setSynthesisStatus(`[${i + 1}/${parsedLines.length}] ${speakerLabel} を音声合成中...`);
 
-        const baseFreq = line.isHost ? 130 : 230; // 周波数（男声 vs 女声）
+        // Google Cloud / Gemini TTS 呼び出し (Neural2-C vs Neural2-B)
+        const pcmBytes = await llmService.synthesizeSpeechWithGoogle(apiKey, line.text, line.isHost);
+
+        // LINEAR16 (PCM 16-bit 24kHz) を Float32Array に変換 (先頭の44バイトWAVヘッダーをスキップ)
+        const dataOffset = pcmBytes.length > 44 && String.fromCharCode(...pcmBytes.slice(0, 4)) === 'RIFF' ? 44 : 0;
+        const pcmView = new DataView(pcmBytes.buffer, pcmBytes.byteOffset + dataOffset, pcmBytes.byteLength - dataOffset);
+        const numSamples = Math.floor(pcmView.byteLength / 2);
+        const floatSamples = new Float32Array(numSamples);
+
         for (let s = 0; s < numSamples; s++) {
-          const t = s / sampleRate;
-          // 自然な発話フォルマント波形のエンベロープ
-          const env = Math.sin((s / numSamples) * Math.PI) * 0.4;
-          const osc1 = Math.sin(2 * Math.PI * baseFreq * t);
-          const osc2 = Math.sin(2 * Math.PI * (baseFreq * 2) * t) * 0.5;
-          const osc3 = Math.sin(2 * Math.PI * (baseFreq * 3) * t) * 0.25;
-          segment[s] = (osc1 + osc2 + osc3) * env * 0.2;
+          const int16 = pcmView.getInt16(s * 2, true);
+          floatSamples[s] = int16 / 32768.0;
         }
 
-        audioChunks.push(segment);
+        audioBuffers.push(floatSamples);
 
-        // 発話間のポーズ（0.3秒）
-        const pauseSamples = Math.floor(0.3 * sampleRate);
-        audioChunks.push(new Float32Array(pauseSamples));
+        // 発話間に 0.25 秒の自然なポーズを挿入
+        const pauseSamples = Math.floor(0.25 * sampleRate);
+        audioBuffers.push(new Float32Array(pauseSamples));
 
-        setSynthesisProgress(10 + Math.round(((i + 1) / parsedLines.length) * 80));
-        await new Promise(r => setTimeout(r, 10));
+        setSynthesisProgress(5 + Math.round(((i + 1) / parsedLines.length) * 90));
       }
 
+      setSynthesisStatus('オーディオトラックを結合・マスタリング中...');
+
       // 全セグメント結合
-      const totalLen = audioChunks.reduce((acc, c) => acc + c.length, 0);
+      const totalLen = audioBuffers.reduce((acc, c) => acc + c.length, 0);
       const combined = new Float32Array(totalLen);
       let offset = 0;
-      for (const chunk of audioChunks) {
+      for (const chunk of audioBuffers) {
         combined.set(chunk, offset);
         offset += chunk.length;
       }
@@ -188,16 +184,20 @@ export const PodcastPlayer: React.FC<PodcastPlayerProps> = ({ script, config: _c
       const url = URL.createObjectURL(wavBlob);
       setSynthesizedAudioUrl(url);
 
-      // 自動ダウンロード
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `Podcast_${Date.now()}.wav`;
-      a.click();
-    } catch (err) {
-      console.error('Audio export failed:', err);
+      // 自動再生開始
+      setTimeout(() => {
+        if (audioRef.current) {
+          audioRef.current.play();
+          setIsPlaying(true);
+        }
+      }, 300);
+    } catch (err: any) {
+      console.error('Neural podcast synthesis failed:', err);
+      alert(`ニューラル音声合成エラー: ${err?.message || err}`);
     } finally {
       setIsSynthesizing(false);
       setSynthesisProgress(0);
+      setSynthesisStatus('');
     }
   };
 
@@ -224,24 +224,36 @@ export const PodcastPlayer: React.FC<PodcastPlayerProps> = ({ script, config: _c
           </div>
 
           <div className="flex items-center space-x-2">
-            <button
-              onClick={handleExportWav}
-              disabled={isSynthesizing || parsedLines.length === 0}
-              className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700/80 transition-all text-xs font-medium flex items-center space-x-1"
-              title="ポッドキャスト音声をWAVファイルとしてダウンロード"
-            >
-              {isSynthesizing ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
-                  <span className="text-[10px]">{synthesisProgress}%</span>
-                </>
-              ) : (
-                <>
-                  <Download className="w-4 h-4 text-indigo-400" />
-                  <span className="text-[10px]">音声保存 (.WAV)</span>
-                </>
-              )}
-            </button>
+            {!synthesizedAudioUrl ? (
+              <button
+                onClick={handleGenerateNeuralPodcast}
+                disabled={isSynthesizing || parsedLines.length === 0}
+                className="py-2 px-3 rounded-xl bg-gradient-to-r from-amber-500 to-indigo-600 hover:from-amber-400 hover:to-indigo-500 text-white shadow-lg shadow-indigo-600/30 transition-all text-xs font-bold flex items-center space-x-1.5 active:scale-95 disabled:opacity-50"
+                title="Google Neural2最高音質でポッドキャスト音声を一括生成"
+              >
+                {isSynthesizing ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                    <span className="text-[11px]">{synthesisProgress}%</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4 text-amber-200 fill-amber-200" />
+                    <span className="text-[11px]">✨ 超高音質AI音声を生成</span>
+                  </>
+                )}
+              </button>
+            ) : (
+              <a
+                href={synthesizedAudioUrl}
+                download={`Podcast_${Date.now()}.wav`}
+                className="py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white transition-all text-xs font-bold flex items-center space-x-1.5 shadow-md shadow-emerald-600/30"
+                title="生成されたポッドキャスト音声をWAVとしてダウンロード"
+              >
+                <Download className="w-4 h-4" />
+                <span className="text-[11px]">音声保存 (.WAV)</span>
+              </a>
+            )}
 
             <button
               onClick={handleReset}
@@ -258,6 +270,13 @@ export const PodcastPlayer: React.FC<PodcastPlayerProps> = ({ script, config: _c
             </button>
           </div>
         </div>
+
+        {isSynthesizing && synthesisStatus && (
+          <div className="bg-indigo-950/60 border border-indigo-500/40 rounded-xl p-2.5 flex items-center space-x-2 text-xs text-indigo-200 animate-pulse">
+            <Loader2 className="w-4 h-4 animate-spin text-indigo-400 shrink-0" />
+            <span className="truncate">{synthesisStatus}</span>
+          </div>
+        )}
 
         {synthesizedAudioUrl && (
           <audio

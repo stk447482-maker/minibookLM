@@ -542,6 +542,58 @@ ${timeHint}`;
     const resultText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
     return resultText.trim();
   }
+
+  // 4. Google Cloud / Gemini ニューラル高音質音声合成 (Neural2-C: 男声ホスト, Neural2-B: 女声ゲスト)
+  public async synthesizeSpeechWithGoogle(
+    apiKey: string,
+    text: string,
+    isHost: boolean,
+    abortSignal?: AbortSignal
+  ): Promise<Uint8Array> {
+    const voiceName = isHost ? 'ja-JP-Neural2-C' : 'ja-JP-Neural2-B';
+    const speakingRate = isHost ? 1.05 : 1.1;
+    const pitch = isHost ? -1.0 : 1.5;
+
+    const url = `https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`;
+    const payload = {
+      input: { text },
+      voice: {
+        languageCode: 'ja-JP',
+        name: voiceName
+      },
+      audioConfig: {
+        audioEncoding: 'LINEAR16', // WAV (PCM)
+        sampleRateHertz: 24000,
+        speakingRate,
+        pitch
+      }
+    };
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: abortSignal
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`Google TTS APIエラー (${res.status}): ${errText}`);
+    }
+
+    const data = await res.json();
+    if (!data.audioContent) {
+      throw new Error('音声データが返却されませんでした');
+    }
+
+    // Base64デコード
+    const binaryStr = atob(data.audioContent);
+    const bytes = new Uint8Array(binaryStr.length);
+    for (let i = 0; i < binaryStr.length; i++) {
+      bytes[i] = binaryStr.charCodeAt(i);
+    }
+    return bytes;
+  }
 }
 
 export const llmService = new LLMService();
