@@ -14,12 +14,14 @@ dist-ssr/
 *.local
 tsconfig.tsbuildinfo
 
-# AI Models (大容量バイナリ)
+# AI Models & Native Tools (大容量バイナリ)
 models/
+tools/
 *.gguf
 *.bin
 *.onnx
 *.safetensors
+download_model.py
 
 # Firebase
 .firebase/

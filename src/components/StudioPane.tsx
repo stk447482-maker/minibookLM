@@ -20,13 +20,14 @@ import {
   RotateCcw
 } from 'lucide-react';
 import { marked } from 'marked';
-import { StudioTab, StudioArtifact } from '../types/index.ts';
+import { StudioTab, StudioArtifact, ModelConfig } from '../types/index.ts';
 import { MermaidViewer } from './studio/MermaidViewer.tsx';
 import { SlideViewer } from './studio/SlideViewer.tsx';
 import { PodcastPlayer } from './studio/PodcastPlayer.tsx';
 import { Graph3DViewer } from './studio/Graph3DViewer.tsx';
 
 interface StudioPaneProps {
+  config?: ModelConfig;
   artifacts: StudioArtifact[];
   streamingArtifact?: { type: StudioTab; title: string; content: string } | null;
   enabledDocsCount: number;
@@ -38,6 +39,7 @@ interface StudioPaneProps {
 }
 
 export const StudioPane: React.FC<StudioPaneProps> = ({
+  config,
   artifacts,
   streamingArtifact,
   enabledDocsCount,
@@ -124,26 +126,59 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
   return (
     <div className="flex flex-col h-full bg-slate-900/40 border-l border-slate-800/80 p-3 md:p-4 space-y-3 min-w-0 overflow-hidden">
       {/* ヘッダー＆対象ドキュメントステータス */}
-      <div className="flex items-center justify-between shrink-0">
-        <div className="flex items-center space-x-2">
-          <Sparkles className="w-4 h-4 text-indigo-400" />
-          <h2 className="text-sm font-bold text-slate-200 uppercase tracking-wider">
-            Studio Pro
-          </h2>
+      <div className="flex flex-col gap-1.5 shrink-0">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            <Sparkles className="w-4 h-4 text-indigo-400" />
+            <h2 className="text-sm font-bold text-slate-200 uppercase tracking-wider">
+              Studio Pro
+            </h2>
+          </div>
+
+          <div>
+            {enabledDocsCount > 0 ? (
+              <span className="text-[10px] bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 px-2 py-0.5 rounded-full flex items-center space-x-1 font-medium">
+                <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse"></span>
+                <span>対象資料: {enabledDocsCount} 件</span>
+              </span>
+            ) : (
+              <span className="text-[10px] bg-rose-500/10 border border-rose-500/30 text-rose-300 px-2 py-0.5 rounded-full font-medium">
+                ⚠️ 左で資料を選択
+              </span>
+            )}
+          </div>
         </div>
 
-        <div>
-          {enabledDocsCount > 0 ? (
-            <span className="text-[10px] bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 px-2 py-0.5 rounded-full flex items-center space-x-1 font-medium">
-              <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse"></span>
-              <span>対象資料: {enabledDocsCount} 件</span>
+        {/* 🎛️ 現在適用中のモデル構成＆最適化バッジ */}
+        {config && (
+          <div className="flex items-center flex-wrap gap-1 text-[10px]">
+            <span className="px-1.5 py-0.5 rounded bg-purple-950/60 border border-purple-500/40 text-purple-300 font-mono truncate max-w-[200px]" title="推論エンジン">
+              {config.mode === 'lmstudio' ? (
+                `🎛️ LM Studio: ${config.desktopModelName ? config.desktopModelName.split('/').pop() : 'gemma-4-12b-qat'}`
+              ) : config.mode === 'desktop-api' ? (
+                `💻 ローカルAPI: ${config.desktopModelName ? config.desktopModelName.split('/').pop() : 'Gemma-12B'}`
+              ) : config.mode === 'cloud-gemini' ? (
+                '☁️ Gemini 1.5 Flash'
+              ) : (
+                `⚡ WebGPU: ${(config.embeddedModelId || '').split('/').pop()}`
+              )}
             </span>
-          ) : (
-            <span className="text-[10px] bg-rose-500/10 border border-rose-500/30 text-rose-300 px-2 py-0.5 rounded-full font-medium">
-              ⚠️ 左で資料を選択
+            <span className="px-1.5 py-0.5 rounded bg-indigo-950/60 border border-indigo-500/40 text-indigo-300 font-mono" title="文字起こし連携">
+              {config.audioTranscriptionEngine === 'native-large-v3' ? (
+                '🎙️ Large-v3 連携'
+              ) : config.audioTranscriptionEngine === 'native-kotoba' ? (
+                '🎙️ Kotoba 連携'
+              ) : config.audioTranscriptionEngine === 'gemini' ? (
+                '☁️ Gemini STT'
+              ) : (
+                '🎙️ STT 連携'
+              )}
             </span>
-          )}
-        </div>
+            <span className="px-1.5 py-0.5 rounded bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 font-sans">
+              ✨ 12B/大容量最適化済
+            </span>
+          </div>
+        )}
       </div>
 
       {/* 10種タブグリッド */}

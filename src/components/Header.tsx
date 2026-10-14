@@ -1,5 +1,5 @@
 import React from 'react';
-import { Laptop, Settings, Sparkles, Sun, Moon, Zap } from 'lucide-react';
+import { Laptop, Settings, Sparkles, Sun, Moon, Zap, Mic } from 'lucide-react';
 import { ModelConfig } from '../types/index.ts';
 
 interface HeaderProps {
@@ -64,6 +64,28 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       <div className="flex items-center space-x-2">
+        {/* 🎙️ 音声文字起こし専用エンジンバッジ */}
+        <button
+          onClick={onOpenSettings}
+          className="hidden sm:flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700/80 border border-purple-500/30 text-xs font-medium text-purple-200 transition-colors shadow-sm"
+          title="文字起こしエンジン設定"
+        >
+          <Mic className="w-3.5 h-3.5 text-purple-400" />
+          <span className="font-mono">
+            {config.audioTranscriptionEngine === 'native-large-v3'
+              ? 'Whisper Large-v3'
+              : config.audioTranscriptionEngine === 'native-kotoba'
+              ? 'Kotoba-Whisper (Native)'
+              : config.audioTranscriptionEngine === 'gemini'
+              ? 'Gemini STT'
+              : config.audioTranscriptionEngine === 'kotoba-whisper'
+              ? 'Kotoba-Whisper (WebGPU)'
+              : config.audioTranscriptionEngine === 'whisper-local'
+              ? 'Whisper-Tiny'
+              : 'Whisper Large-v3 (自動)'}
+          </span>
+        </button>
+
         {/* ☀️ / 🌙 テーマ切り替えボタン */}
         <button
           onClick={onToggleTheme}
@@ -73,40 +95,36 @@ export const Header: React.FC<HeaderProps> = ({
           {isDarkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-indigo-400" />}
         </button>
 
+        {/* 🎛️ メインLLMモデル＆設定ボタン */}
         <button
           onClick={onOpenSettings}
           className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700/70 text-xs font-medium text-slate-200 transition-colors shadow-sm"
+          title="AIモデル＆環境設定"
         >
           {config.mode === 'lmstudio' ? (
             <>
               <span className="w-2 h-2 rounded-full bg-purple-400 animate-pulse"></span>
-              <span className="text-purple-300">🎛️ LM Studio {config.desktopModelName ? `(${config.desktopModelName})` : ''}</span>
-            </>
-          ) : config.mode === 'cloud-gemini' || config.cloudApiKey ? (
-            <>
-              <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-              <span>☁️ Gemini API</span>
+              <span className="text-purple-300 font-semibold truncate max-w-[200px]">
+                🎛️ LM Studio: {config.desktopModelName ? config.desktopModelName.split('/').pop() : 'google/gemma-4-12b-qat'}
+              </span>
             </>
           ) : config.mode === 'desktop-api' ? (
             <>
               <Laptop className="w-3.5 h-3.5 text-cyan-400" />
-              <span>💻 ローカルAPI</span>
+              <span className="text-cyan-300 truncate max-w-[200px]">
+                💻 ローカル: {config.desktopModelName ? config.desktopModelName.split('/').pop() : 'Gemma-12B'}
+              </span>
+            </>
+          ) : config.mode === 'cloud-gemini' ? (
+            <>
+              <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+              <span>☁️ Gemini 1.5 Flash</span>
             </>
           ) : (
             <>
               <Zap className="w-3.5 h-3.5 text-emerald-400 fill-emerald-400" />
               <span>
-                ⚡ WebGPU (
-                {config.embeddedModelId.includes('1.5B')
-                  ? '1.5B'
-                  : config.embeddedModelId.includes('0.5B')
-                  ? '0.5B'
-                  : config.embeddedModelId.includes('gemma')
-                  ? 'Gemma 2B'
-                  : config.embeddedModelId.includes('Llama')
-                  ? 'Llama 1B'
-                  : 'WebLLM'}
-                +RAG)
+                ⚡ WebGPU ({config.embeddedModelId.split('/').pop() || 'WebLLM'})
               </span>
             </>
           )}

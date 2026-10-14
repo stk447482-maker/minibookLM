@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { X, Smartphone, Laptop, Sparkles, Check, Cloud, Key, Folder, RefreshCw, Zap, Download, Database } from 'lucide-react';
+import { X, Smartphone, Laptop, Sparkles, Check, Cloud, Key, Folder, RefreshCw, Zap, Download, Database, Cpu } from 'lucide-react';
 import { ModelConfig, ModelMode, ModelTuningProfile } from '../types/index.ts';
+
 
 
 import { llmService } from '../services/llmService.ts';
@@ -869,6 +870,29 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-500"></div>
             </label>
           </div>
+
+          {/* C++ Native Whisper (whisper-server.exe) エンドポイント */}
+          {(config.audioTranscriptionEngine === 'native-large-v3' || config.audioTranscriptionEngine === 'native-kotoba' || !config.audioTranscriptionEngine || config.audioTranscriptionEngine === 'auto') && (
+            <div className="pt-2 border-t border-slate-800/80">
+              <label className="text-[10px] text-slate-400 flex items-center justify-between mb-1">
+                <span className="flex items-center space-x-1">
+                  <Cpu className="w-3 h-3 text-amber-400" />
+                  <span>C++ Native Whisper (whisper-server.exe) 接続URL</span>
+                </span>
+                <span className="text-[9px] text-slate-500 font-mono">start_whisper_server.bat で起動</span>
+              </label>
+              <input
+                type="text"
+                value={config.whisperServerEndpoint || 'http://127.0.0.1:8080'}
+                onChange={(e) => onChangeConfig({ ...config, whisperServerEndpoint: e.target.value })}
+                placeholder="http://127.0.0.1:8080"
+                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-amber-500 font-mono"
+              />
+              <span className="text-[10px] text-slate-500 block mt-1">
+                ※ Python不要の単体C++サーバー。Firebase等のHTTPSから接続する際は、ブラウザ設定で「安全でないコンテンツ」を許可してください。
+              </span>
+            </div>
+          )}
 
           {/* APIキー入力 (Gemini利用時) */}
           {(config.mode === 'cloud-gemini' || config.audioTranscriptionEngine === 'gemini' || !config.audioTranscriptionEngine || config.audioTranscriptionEngine === 'auto') && (

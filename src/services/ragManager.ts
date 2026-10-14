@@ -18,6 +18,46 @@ GeminiやNotebookLMのように、音声認識（Whisper）が出力した生テ
 4. 話者が発言した意味とニュアンスを100%忠実に保ち、余計な敬語化や過度な意訳は避けてください。
 5. 出力は校正後のテキストのみを出力してください。「以下が校正文です」等の挨拶や解説は一切不要です。`;
 
+const NATIVE_HALLUCINATION_PATTERNS: RegExp[] = [
+  /視聴ありがとうございました/i,
+  /ご視聴ありがとうございました/i,
+  /チャンネル登録/i,
+  /高評価/i,
+  /おやすみなさい/i,
+  /それではまた/i,
+  /Subtitles by/i,
+  /Transcribed by/i,
+  /Amara\.org/i
+];
+
+async function refineChunksWithLMStudio(
+  chunks: { start: string; end: string; text: string }[],
+  endpoint: string,
+  signal?: AbortSignal
+): Promise<string> {
+  const combined = chunks.map(c => `[${c.start} - ${c.end}] ${c.text}`).join('\n');
+  try {
+    const res = await fetch(`${endpoint}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messages: [
+          { role: 'system', content: REFINER_SYSTEM_PROMPT },
+          { role: 'user', content: combined }
+        ],
+        temperature: 0.1,
+        stream: false
+      }),
+      signal
+    });
+    if (!res.ok) return combined;
+    const data = await res.json();
+    return data.choices?.[0]?.message?.content || combined;
+  } catch {
+    return combined;
+  }
+}
+
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
 
 class RAGManager {
@@ -211,56 +251,183 @@ class RAGManager {
     file: File,
     onProgress?: (status: string, percent?: number) => void,
     options?: {
-      enginePreference?: 'auto' | 'gemini' | 'kotoba-whisper' | 'whisper-local' | 'native-kotoba' | 'native-large-v3';
+      enginePreference?: 'auto' | 'gemini' | 'whisper-small' | 'whisper-large-v3' | 'kotoba-whisper' | 'native-large-v3' | 'native-kotoba' | 'whisper-local';
       cloudApiKey?: string;
       abortSignal?: AbortSignal;
       modelConfig?: ModelConfig;
     }
   ): Promise<string> {
-    onProgress?.('音声データを読み込み・デコード中...', 10);
+    const pref = options?.enginePreference || 'whisper-small';
+    onProgress?.('音声データを読み込み中...', 10);
 
-    // 🖥️ 1. デスクトップ Native C++ Whisper パイプライン (server.py が起動している場合は最優先試行)
-    const preferNative = options?.enginePreference === 'native-kotoba' || options?.enginePreference === 'native-large-v3' || options?.enginePreference === 'auto' || !options?.enginePreference;
-    if (preferNative) {
-      const serverEndpoint = options?.modelConfig?.desktopApiEndpoint || 'http://127.0.0.1:11434';
+    // =========================================================================
+    // 🚀 選択肢B: Google Gemini 1.5 Flash (超高速クラウド / 約1〜2分)
+    // =========================================================================
+    if (pref === 'gemini') {
+      const apiKey = options?.cloudApiKey || options?.modelConfig?.cloudApiKey;
+      if (!apiKey) {
+        throw new Error('Gemini APIキーが設定されていません。設定パネルでAPIキーを入力してください。');
+      }
+
+      onProgress?.('Gemini 1.5 Flash へ音声データを直接送信中 (超高速認識)...', 30);
       try {
-        const statusRes = await fetch(`${serverEndpoint}/api/transcribe/status`, { method: 'GET', signal: AbortSignal.timeout(2000) });
-        if (statusRes.ok) {
-          const modelParam = options?.enginePreference === 'native-large-v3' ? 'large-v3' : 'kotoba';
-          const modelLabel = modelParam === 'large-v3' ? 'Whisper Large-v3 (FP16 Native)' : 'Kotoba-Whisper v2.0 (C++ Native)';
-          onProgress?.(`🚀 本番C++ネイティブエンジン (${modelLabel}) で高速文字起こし中...`, 30);
+        let mimeType = file.type || 'audio/mp3';
+        const ext = file.name.split('.').pop()?.toLowerCase();
+        if (ext === 'mp3') mimeType = 'audio/mp3';
+        else if (ext === 'm4a') mimeType = 'audio/mp4';
+        else if (ext === 'wav') mimeType = 'audio/wav';
 
-          const formData = new FormData();
-          formData.append('file', file);
-          formData.append('model', modelParam);
-          formData.append('refine_with_lmstudio', options?.modelConfig?.enableAudioContextRefiner ? 'true' : 'false');
-          formData.append('lmstudio_endpoint', options?.modelConfig?.lmStudioEndpoint || 'http://localhost:1234/v1');
+        const transcript = await llmService.transcribeAudioWithGemini(
+          apiKey,
+          file,
+          0,
+          options?.abortSignal,
+          mimeType
+        );
 
-          const transRes = await fetch(`${serverEndpoint}/api/transcribe`, {
-            method: 'POST',
-            body: formData,
-            signal: options?.abortSignal
-          });
-
-          if (transRes.ok) {
-            const data = await transRes.json();
-            const transcript = data.refined_transcript || data.raw_transcript;
-            if (transcript && transcript.trim()) {
-              onProgress?.('文字起こし完了！ドキュメント登録中...', 98);
-              let resultMarkdown = `## 🎙️ 音声/動画 文字起こしデータ (${modelLabel})\n`;
-              resultMarkdown += `- **ファイル名:** ${file.name}\n`;
-              resultMarkdown += `- **解析エンジン:** ${data.model_used} (自己完結型 C++ Native / temperature:0.0)\n\n`;
-              resultMarkdown += `### 📝 文字起こし内容 (Transcript)\n\n${transcript.trim()}\n\n`;
-              onProgress?.('完了', 100);
-              return resultMarkdown;
-            }
-          }
-        }
-      } catch (nativeErr) {
-        // server.py が動いていない場合は自動的にブラウザ/クラウドモードへシームレスにフォールバック
-        console.warn('Native Whisper endpoint unavailable, falling back to Web/Cloud pipeline:', nativeErr);
+        onProgress?.('文字起こし完了！ドキュメント登録中...', 98);
+        let resultMarkdown = `## 🎙️ 音声/動画 文字起こしデータ (Google Gemini 1.5 Flash)\n`;
+        resultMarkdown += `- **ファイル名:** ${file.name}\n`;
+        resultMarkdown += `- **ファイルサイズ:** ${(file.size / (1024 * 1024)).toFixed(1)} MB\n`;
+        resultMarkdown += `- **解析エンジン:** Google Gemini 1.5 Flash Multimodal Audio (超高速クラウド)\n\n`;
+        resultMarkdown += `### 📝 文字起こし内容 (Transcript)\n\n${transcript.trim()}\n\n`;
+        onProgress?.('完了', 100);
+        return resultMarkdown;
+      } catch (geminiErr: any) {
+        throw new Error(`Gemini 音声文字起こしに失敗しました: ${geminiErr?.message || geminiErr}`);
       }
     }
+
+    // =========================================================================
+    // ⚡ 選択肢A (Small高速) / 🎯 選択肢C (Large-v3分割進捗)
+    // =========================================================================
+    const whisperServer = options?.modelConfig?.whisperServerEndpoint || 'http://127.0.0.1:8080';
+    let whisperServerActive = false;
+    try {
+      const ping = await fetch(`${whisperServer}/`, { method: 'GET', signal: AbortSignal.timeout(1500) });
+      whisperServerActive = ping.ok;
+    } catch {
+      whisperServerActive = false;
+    }
+
+    // C++ Whisper サーバーが動いている場合
+    if (whisperServerActive) {
+      const isSmall = pref === 'whisper-small' || pref === 'auto';
+      const modelLabel = isSmall ? 'Whisper Small (C++ 高速・465MB)' : 'Whisper Large-v3 (C++ 最高峰・3GB)';
+      onProgress?.(`🚀 ${modelLabel} で文字起こし中...`, 30);
+
+      const formData = new FormData();
+      formData.append('file', file, file.name || 'audio.mp3');
+      formData.append('temperature', '0.0');
+      formData.append('temperature_inc', '0.2');
+      formData.append('response_format', 'verbose_json');
+
+      const transRes = await fetch(`${whisperServer}/inference`, {
+        method: 'POST',
+        body: formData,
+        signal: options?.abortSignal
+      });
+
+      if (!transRes.ok) {
+        const errText = await transRes.text();
+        throw new Error(`❌ C++ whisper-server での文字起こしに失敗しました (${transRes.status}): ${errText}`);
+      }
+
+      const data = await transRes.json();
+      const segments: any[] = data.segments || [];
+
+      // 幻聴・ループ・定型文のフィルタリング
+      const cleanChunks: { start: string; end: string; text: string }[] = [];
+      let lastText = '';
+      for (const seg of segments) {
+        const text = (seg.text || '').trim();
+        if (!text || text.length <= 1) continue;
+        if (NATIVE_HALLUCINATION_PATTERNS.some(p => p.test(text))) continue;
+        if (text === lastText) continue;
+        lastText = text;
+
+        const startSec = Math.floor((seg.t0 || 0) / 100);
+        const endSec = Math.floor((seg.t1 || 0) / 100);
+        const formatTime = (s: number) => {
+          const m = Math.floor(s / 60);
+          const sec = s % 60;
+          return `${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
+        };
+        cleanChunks.push({
+          start: formatTime(startSec),
+          end: formatTime(endSec),
+          text
+        });
+      }
+
+      const rawTranscript = cleanChunks.length > 0
+        ? cleanChunks.map(c => `[${c.start} - ${c.end}] ${c.text}`).join('\n')
+        : (data.text || '').trim();
+
+      let refinedTranscript = rawTranscript;
+      const enableRefiner = options?.modelConfig?.enableAudioContextRefiner !== false;
+      const lmStudioEndpoint = options?.modelConfig?.lmStudioEndpoint || 'http://localhost:1234/v1';
+
+      if (enableRefiner && cleanChunks.length > 0) {
+        onProgress?.('🧠 LM Studio (Gemma 12B) で文脈校正中...', 75);
+        refinedTranscript = await refineChunksWithLMStudio(cleanChunks, lmStudioEndpoint, options?.abortSignal);
+      }
+
+      onProgress?.('文字起こし完了！ドキュメント登録中...', 98);
+      let resultMarkdown = `## 🎙️ 音声/動画 文字起こしデータ (${modelLabel})\n`;
+      resultMarkdown += `- **ファイル名:** ${file.name}\n`;
+      resultMarkdown += `- **ファイルサイズ:** ${(file.size / (1024 * 1024)).toFixed(1)} MB\n`;
+      resultMarkdown += `- **解析エンジン:** C++ Native whisper-server (${isSmall ? 'Small高速' : 'Large-v3'})\n\n`;
+      resultMarkdown += `### 📝 文字起こし内容 (Transcript)\n\n${refinedTranscript.trim()}\n\n`;
+
+      if (rawTranscript && refinedTranscript && rawTranscript.trim() !== refinedTranscript.trim()) {
+        resultMarkdown += `<details>\n<summary>🔍 Whisper 生の出力テキスト (Raw Transcript / 忠実記録)</summary>\n\n\`\`\`\n${rawTranscript.trim()}\n\`\`\`\n</details>\n\n`;
+      }
+
+      onProgress?.('完了', 100);
+      return resultMarkdown;
+    }
+
+    // 🐍 1-B: server.py (ポート11434) フォールバック
+    const serverEndpoint = options?.modelConfig?.desktopApiEndpoint || 'http://127.0.0.1:11434';
+    try {
+      const statusRes = await fetch(`${serverEndpoint}/api/transcribe/status`, { method: 'GET', signal: AbortSignal.timeout(2000) });
+      if (statusRes.ok) {
+        const modelParam = pref === 'whisper-large-v3' ? 'large-v3' : 'small';
+        const modelLabel = modelParam === 'large-v3' ? 'Whisper Large-v3' : 'Whisper Small (高速)';
+        onProgress?.(`🚀 C++ネイティブ (${modelLabel}) で文字起こし中...`, 30);
+
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('model', modelParam);
+        formData.append('refine_with_lmstudio', options?.modelConfig?.enableAudioContextRefiner ? 'true' : 'false');
+        formData.append('lmstudio_endpoint', options?.modelConfig?.lmStudioEndpoint || 'http://localhost:1234/v1');
+
+        const transRes = await fetch(`${serverEndpoint}/api/transcribe`, {
+          method: 'POST',
+          body: formData,
+          signal: options?.abortSignal
+        });
+
+        if (transRes.ok) {
+          const data = await transRes.json();
+          const transcript = data.refined_transcript || data.raw_transcript;
+          if (transcript && transcript.trim()) {
+            onProgress?.('文字起こし完了！ドキュメント登録中...', 98);
+            let resultMarkdown = `## 🎙️ 音声/動画 文字起こしデータ (${modelLabel})\n`;
+            resultMarkdown += `- **ファイル名:** ${file.name}\n`;
+            resultMarkdown += `- **解析エンジン:** ${data.model_used} (自己完結型 C++ Native / temperature:0.0)\n\n`;
+            resultMarkdown += `### 📝 文字起こし内容 (Transcript)\n\n${transcript.trim()}\n\n`;
+            onProgress?.('完了', 100);
+            return resultMarkdown;
+          }
+        }
+      }
+    } catch (nativeErr) {
+      console.warn('Desktop API endpoint unavailable:', nativeErr);
+    }
+
+
 
     try {
       // 1. WAV / 音声ファイルを 16kHz モノラル Float32Array に安全デコード（メモリ上限回避）
@@ -463,7 +630,7 @@ ${combinedRaw.slice(0, 3000)}`;
     projectId: string,
     onProgress?: (percent: number, status?: string) => void,
     options?: {
-      enginePreference?: 'auto' | 'gemini' | 'kotoba-whisper' | 'whisper-local' | 'native-kotoba' | 'native-large-v3';
+      enginePreference?: 'auto' | 'gemini' | 'whisper-small' | 'whisper-large-v3' | 'kotoba-whisper' | 'native-large-v3' | 'native-kotoba' | 'whisper-local';
       cloudApiKey?: string;
       abortSignal?: AbortSignal;
       modelConfig?: ModelConfig;

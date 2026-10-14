@@ -2,9 +2,15 @@
 # [Auditor] Antigravity 2.0 x takumiGuard
 # [Status] Pass (Harness env checked).
 
+import sys
 import os
 import json
 import asyncio
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8')
+
 import urllib.request
 import urllib.error
 from typing import List, Optional, AsyncGenerator
@@ -326,6 +332,8 @@ MODELS_DIR = os.path.join(BASE_DIR, "models")
 URL_WHISPER_BIN = "https://github.com/ggerganov/whisper.cpp/releases/download/b5454/whisper-bin-x64.zip"
 URL_KOTOBA_WHISPER = "https://huggingface.co/kotoba-tech/kotoba-whisper-v2.0-ggml/resolve/main/ggml-kotoba-whisper-v2.0-q5_0.bin"
 FILE_KOTOBA_WHISPER = "ggml-kotoba-whisper-v2.0-q5_0.bin"
+URL_SMALL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin"
+FILE_SMALL = "ggml-small.bin"
 URL_LARGE_V3 = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin"
 FILE_LARGE_V3 = "ggml-large-v3.bin"
 
@@ -335,7 +343,13 @@ HALLUCINATION_PATTERNS = [
     re.compile(r'高評価.*お願い'),
     re.compile(r'最後までご[覧見]いただき'),
     re.compile(r'字幕[：:].*'),
-    re.compile(r'翻訳[：:].*')
+    re.compile(r'翻訳[：:].*'),
+    re.compile(r'テーブルを押す'),
+    re.compile(r'ご清聴'),
+    re.compile(r'MBCニュース'),
+    re.compile(r'NHKニュース'),
+    re.compile(r'おやすみなさい'),
+    re.compile(r'それではまた'),
 ]
 
 def get_native_whisper_exe() -> Optional[str]:
@@ -403,16 +417,20 @@ def ensure_whisper_cli() -> str:
         raise RuntimeError("whisper-cli.exe の展開に失敗しました")
     return found
 
-def ensure_whisper_model(model_name: str = "kotoba") -> str:
-    """指定されたモデル（Kotoba または Large-v3）を取得"""
+def ensure_whisper_model(model_name: str = "small") -> str:
+    """指定されたモデル（Small, Kotoba, または Large-v3）を取得"""
     os.makedirs(MODELS_DIR, exist_ok=True)
     if "large" in model_name.lower():
         dest = os.path.join(MODELS_DIR, FILE_LARGE_V3)
         download_file_with_resume(URL_LARGE_V3, dest, min_bytes=2500 * 1024 * 1024)
         return dest
-    else:
+    elif "kotoba" in model_name.lower():
         dest = os.path.join(MODELS_DIR, FILE_KOTOBA_WHISPER)
         download_file_with_resume(URL_KOTOBA_WHISPER, dest, min_bytes=450 * 1024 * 1024)
+        return dest
+    else:
+        dest = os.path.join(MODELS_DIR, FILE_SMALL)
+        download_file_with_resume(URL_SMALL, dest, min_bytes=400 * 1024 * 1024)
         return dest
 
 @app.get("/api/transcribe/status")
@@ -428,10 +446,77 @@ def get_transcribe_status():
         "whisper_path": exe
     }
 
+def repair_wav_if_corrupted(file_path: str) -> str:
+    """RIFFヘッダーが破損（サイズ0等）しているWAVファイルを検出・正常な標準WAVに自動修復"""
+    try:
+        with open(file_path, "rb") as f:
+            header = f.read(64)
+            if len(header) < 44 or header[:4] != b"RIFF" or header[8:12] != b"WAVE":
+                return file_path
+                
+            riff_size = int.from_bytes(header[4:8], "little")
+            file_size = os.path.getsize(file_path)
+            
+            # RIFFサイズが0または異常値の場合、自動修復を実行
+            if riff_size == 0 or abs(riff_size - (file_size - 8)) > 1024:
+                f.seek(12)
+                data_offset = 0
+                data_size = 0
+                sample_rate = 44100
+                num_channels = 1
+                bits_per_sample = 16
+                
+                while True:
+                    chunk_hdr = f.read(8)
+                    if len(chunk_hdr) < 8:
+                        break
+                    c_id = chunk_hdr[:4]
+                    c_sz = int.from_bytes(chunk_hdr[4:8], "little")
+                    if c_id == b"fmt ":
+                        fmt_body = f.read(c_sz)
+                        if len(fmt_body) >= 16:
+                            num_channels = int.from_bytes(fmt_body[2:4], "little")
+                            sample_rate = int.from_bytes(fmt_body[4:8], "little")
+                            bits_per_sample = int.from_bytes(fmt_body[14:16], "little")
+                    elif c_id == b"data":
+                        data_offset = f.tell()
+                        data_size = c_sz if c_sz > 0 else (file_size - data_offset)
+                        break
+                    else:
+                        f.seek(c_sz, 1)
+                
+                if data_offset > 0:
+                    repaired_path = file_path + ".repaired.wav"
+                    actual_data_len = min(data_size, file_size - data_offset)
+                    with open(repaired_path, "wb") as out_f:
+                        out_f.write(b"RIFF")
+                        out_f.write((36 + actual_data_len).to_bytes(4, "little"))
+                        out_f.write(b"WAVE")
+                        out_f.write(b"fmt \x10\x00\x00\x00\x01\x00")
+                        out_f.write(num_channels.to_bytes(2, "little"))
+                        out_f.write(sample_rate.to_bytes(4, "little"))
+                        byte_rate = sample_rate * num_channels * (bits_per_sample // 8)
+                        out_f.write(byte_rate.to_bytes(4, "little"))
+                        block_align = num_channels * (bits_per_sample // 8)
+                        out_f.write(block_align.to_bytes(2, "little"))
+                        out_f.write(bits_per_sample.to_bytes(2, "little"))
+                        out_f.write(b"data")
+                        out_f.write(actual_data_len.to_bytes(4, "little"))
+                        f.seek(data_offset)
+                        while True:
+                            buf = f.read(1024 * 1024)
+                            if not buf:
+                                break
+                            out_f.write(buf)
+                    return repaired_path
+    except Exception as e:
+        print(f"[Notice] WAVヘッダー自動修復スキップ: {e}")
+    return file_path
+
 @app.post("/api/transcribe")
 async def transcribe_audio(
     file: UploadFile = FastAPIFile(...),
-    model: str = Form("kotoba"), # "kotoba" | "large-v3"
+    model: str = Form("large-v3"), # デフォルトで最高峰 Large-v3
     refine_with_lmstudio: bool = Form(True),
     lmstudio_endpoint: str = Form("http://localhost:1234/v1")
 ):
@@ -443,34 +528,33 @@ async def transcribe_audio(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"音声認識環境の準備に失敗しました: {str(e)}")
 
-    # 2. 一時ファイルへ安全保存
+    # 2. 一時ファイルへ安全保存 ＆ 破損WAV自動修復
     suffix = os.path.splitext(file.filename or "audio.wav")[1] or ".wav"
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_audio:
         tmp_audio_path = tmp_audio.name
         content = await file.read()
         tmp_audio.write(content)
 
+    # 破損ヘッダーWAVの自動修復
+    tmp_audio_path = repair_wav_if_corrupted(tmp_audio_path)
+
     try:
         # CPUスレッド数を最適化
         threads = min(12, max(4, (os.cpu_count() or 4) // 2))
-        anchor_prompt = "以下は日本語の打ち合わせ・ビジネス会話・日常会話です。相槌、業務連絡、手続きに関する発話が含まれます。"
 
-        # 3. whisper-cli.exe のゼロハルシネーション実行
+        # 3. whisper-cli.exe の高精度推論実行
+        # - 幻覚を誘発する長文プロンプトと --carry-initial-prompt を排除し、純粋な音響トークン認識に集中
         cmd = [
             whisper_exe,
             "-m", model_path,
             "-f", tmp_audio_path,
             "-l", "ja",
             "-t", str(threads),
-            "-mc", "0",          # 前区間のコンテキスト感染防止
+            "-mc", "64",         # 前区間のコンテキストを適度に保持して文脈崩壊を防止
             "-bs", "4",          # ビーム探索 4
             "--best-of", "4",
-            "-tp", "0.0",        # 温度0固定
-            "-nf",               # 温度フォールバック無効
-            "-nth", "0.55",      # VAD無音閾値
-            "-sns",              # 非音声抑制
-            "--prompt", anchor_prompt,
-            "--carry-initial-prompt"
+            "-tp", "0.0",        # 温度0起点
+            "-tpi", "0.2"        # 確信度が低い低音量・難聴箇所は自動で温度を上げて再探索
         ]
 
         proc = subprocess.run(
@@ -508,7 +592,7 @@ async def transcribe_audio(
         if not combined_text:
             combined_text = raw_output.strip()
 
-        # 4. LM Studio による文脈復元・校正 (Refiner)
+        # 4. LM Studio / Gemma による長尺対応 チャンク分割文脈復元・校正 (Refiner)
         refined_text = None
         if refine_with_lmstudio and chunks:
             clean_endpoint = lmstudio_endpoint.rstrip("/")
@@ -516,28 +600,45 @@ async def transcribe_audio(
                 clean_endpoint = f"{clean_endpoint}/chat/completions" if clean_endpoint.endswith("/v1") else f"{clean_endpoint}/v1/chat/completions"
 
             refiner_system = (
-                "あなたは極めて優秀な音声認識校正・文脈復元AIです。"
-                "Whisperが出力した生テキストの同音異義誤り、助詞の脱落、句読点のみを自然に整えてください。"
-                "事実の捏造や創作は一切禁止。タイムスタンプ [00:00 - 00:05] の構造は維持し、校正後テキストのみを出力してください。"
+                "あなたは発言の忠実性を最優先する音声認識校正専門AIです。"
+                "【最重要ルール】"
+                "1. 要約、言い換え、省略、敬語への変換は一切禁止。話者が発言した語順・相槌・表現をそのまま忠実に残すこと。"
+                "2. 修正対象は、明らかに音声認識が誤認した『同音異義語の漢字間違い』と『助詞の脱落』『句読点の補正』のみに限定すること。"
+                "3. 各行のタイムスタンプ [00:00 - 00:05] の構造は絶対に改変・削除せず維持すること。"
+                "4. 挨拶や解説文は出力せず、校正後のテキストのみを出力すること。"
             )
-            prompt = f"以下の音声認識生テキストを校正してください:\n\n{combined_text[:3500]}"
+
+            # 3500文字の切り捨てを撤廃し、約25チャンク（1,500〜2,000文字）ごとに分割して順次校正
+            BATCH_SIZE = 25
+            refined_chunks_list = []
             
             try:
-                async with httpx.AsyncClient(timeout=60.0) as client:
-                    lm_resp = await client.post(
-                        clean_endpoint,
-                        json={
-                            "messages": [
-                                {"role": "system", "content": refiner_system},
-                                {"role": "user", "content": prompt}
-                            ],
-                            "temperature": 0.1,
-                            "stream": False
-                        }
-                    )
-                    if lm_resp.status_code == 200:
-                        lm_data = lm_resp.json()
-                        refined_text = lm_data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+                async with httpx.AsyncClient(timeout=90.0) as client:
+                    for i in range(0, len(chunks), BATCH_SIZE):
+                        batch = chunks[i:i + BATCH_SIZE]
+                        batch_text = "\n".join([f"[{c['start']} - {c['end']}] {c['text']}" for c in batch])
+                        prompt = f"以下の音声認識生テキストを校正してください（タイムスタンプは維持すること）:\n\n{batch_text}"
+
+                        lm_resp = await client.post(
+                            clean_endpoint,
+                            json={
+                                "messages": [
+                                    {"role": "system", "content": refiner_system},
+                                    {"role": "user", "content": prompt}
+                                ],
+                                "temperature": 0.1,
+                                "stream": False
+                            }
+                        )
+                        if lm_resp.status_code == 200:
+                            lm_data = lm_resp.json()
+                            batch_refined = lm_data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+                            refined_chunks_list.append(batch_refined if batch_refined else batch_text)
+                        else:
+                            refined_chunks_list.append(batch_text)
+
+                if refined_chunks_list:
+                    refined_text = "\n".join(refined_chunks_list)
             except Exception as ref_err:
                 print(f"[Notice] LM Studio 文脈校正スキップ: {ref_err}")
 
@@ -557,6 +658,6 @@ async def transcribe_audio(
 
 if __name__ == "__main__":
     import uvicorn
-    print("🚀 MiniBookLM 本番APIサーバー (完全脱モック＆C++ Native 音声エンジン搭載) を起動します (ポート: 11434)...")
+    print("[INFO] MiniBookLM Production API Server starting on port 11434...")
     uvicorn.run(app, host="127.0.0.1", port=11434)
 

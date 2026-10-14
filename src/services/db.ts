@@ -159,6 +159,71 @@ class IndexedDBManager {
     });
   }
 
+  public async moveDocument(docId: string, targetProjectId: string): Promise<void> {
+    const db = await this.getDB();
+    const docChunks = await this.getChunksByDocId(docId);
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(['documents', 'chunks'], 'readwrite');
+      const docStore = tx.objectStore('documents');
+      const chunkStore = tx.objectStore('chunks');
+
+      const docReq = docStore.get(docId);
+      docReq.onsuccess = () => {
+        const doc = docReq.result as DocumentSource;
+        if (doc) {
+          doc.projectId = targetProjectId;
+          docStore.put(doc);
+        }
+      };
+
+      docChunks.forEach(chunk => {
+        chunk.projectId = targetProjectId;
+        chunkStore.put(chunk);
+      });
+
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  public async copyDocument(docId: string, targetProjectId: string): Promise<void> {
+    const db = await this.getDB();
+    const docChunks = await this.getChunksByDocId(docId);
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(['documents', 'chunks'], 'readwrite');
+      const docStore = tx.objectStore('documents');
+      const chunkStore = tx.objectStore('chunks');
+
+      const docReq = docStore.get(docId);
+      docReq.onsuccess = () => {
+        const doc = docReq.result as DocumentSource;
+        if (doc) {
+          const newDocId = crypto.randomUUID();
+          const copiedDoc: DocumentSource = {
+            ...doc,
+            id: newDocId,
+            projectId: targetProjectId,
+            uploadedAt: Date.now()
+          };
+          docStore.put(copiedDoc);
+
+          docChunks.forEach(chunk => {
+            const copiedChunk: DocumentChunk = {
+              ...chunk,
+              id: crypto.randomUUID(),
+              docId: newDocId,
+              projectId: targetProjectId
+            };
+            chunkStore.put(copiedChunk);
+          });
+        }
+      };
+
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
   // --- Chunks ---
   public async getChunksByProject(projectId: string): Promise<DocumentChunk[]> {
     const db = await this.getDB();

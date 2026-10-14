@@ -348,15 +348,6 @@ class LLMService {
       }
     }
 
-    // ☁️ クラウド Gemini API モード（またはAPIキー設定時）
-    if (config.mode === 'cloud-gemini' || config.cloudApiKey) {
-      if (!config.cloudApiKey) {
-        throw new Error('Google Gemini APIキーが未入力です。「⚙️設定」からAPIキーを入力するか、ブラウザ内推論（WebLLM）をお選びください。');
-      }
-      yield* this.streamGeminiDirect(config.cloudApiKey, config.desktopModelName || 'gemini-1.5-flash', messages, config.temperature, abortSignal);
-      return;
-    }
-
     // 💻 デスクトップ API モード (ローカル Ollama / llama-server / server.py)
     if (config.mode === 'desktop-api') {
       const endpoint = config.desktopApiEndpoint || 'http://127.0.0.1:11434';
@@ -368,6 +359,15 @@ class LLMService {
         const msg = err instanceof Error ? err.message : String(err);
         throw new Error(`ローカルAPI (${endpoint}) への接続に失敗しました: ${msg}。\nOllama または server.py が起動しているかご確認ください。\n完全ブラウザ内推論をご利用の場合は「⚙️設定」から「⚡ ブラウザ内 WebGPU」を選択してください。`);
       }
+    }
+
+    // ☁️ クラウド Gemini API モード（明示的に cloud-gemini が選択されている場合）
+    if (config.mode === 'cloud-gemini') {
+      if (!config.cloudApiKey) {
+        throw new Error('Google Gemini APIキーが未入力です。「⚙️設定」からAPIキーを入力するか、ローカル推論またはブラウザ内推論（WebLLM）をお選びください。');
+      }
+      yield* this.streamGeminiDirect(config.cloudApiKey, config.desktopModelName || 'gemini-1.5-flash', messages, config.temperature, abortSignal);
+      return;
     }
 
     // 📱/💻 ブラウザ内 WebGPU (WebLLM) 推論モード（Python不要・完全ブラウザ完結）
@@ -471,7 +471,8 @@ class LLMService {
     apiKey: string,
     audioBlob: Blob,
     timeOffsetSec = 0,
-    abortSignal?: AbortSignal
+    abortSignal?: AbortSignal,
+    customMimeType?: string
   ): Promise<string> {
     const base64Data = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
@@ -500,6 +501,9 @@ class LLMService {
 4. 前置きや挨拶（「承知しました」「文字起こし結果です」等）は一切省き、文字起こし本文のみを出力してください。
 ${timeHint}`;
 
+    // 原音ファイルの MIME タイプを正確に反映（mp3, m4a, wav等）
+    const effectiveMimeType = customMimeType || audioBlob.type || 'audio/wav';
+
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
     const payload = {
       contents: [
@@ -507,7 +511,7 @@ ${timeHint}`;
           parts: [
             {
               inline_data: {
-                mime_type: 'audio/wav',
+                mime_type: effectiveMimeType,
                 data: base64Data
               }
             },

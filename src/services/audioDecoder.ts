@@ -141,7 +141,8 @@ export function parseWavTo16kMono(buffer: ArrayBuffer): { audioData: Float32Arra
       }
     }
 
-    return { audioData: output, durationSec };
+    const enhanced = normalizeAndEnhanceAudio(output);
+    return { audioData: enhanced, durationSec };
   } catch (e) {
     console.warn('Pure WAV decoder fallback:', e);
     return null;
@@ -149,7 +150,44 @@ export function parseWavTo16kMono(buffer: ArrayBuffer): { audioData: Float32Arra
 }
 
 /**
- * 任意の音声ファイル（WAV, MP3, M4A, AAC, OGG）を 16kHz モノラル Float32Array にデコード
+ * 🎯 Whisper専用 クリーン・ピークノーマライザー (原音フォルマント100%維持)
+ * - 余計なコンプレッサーや過剰増幅（ノイズ爆発）を排除
+ * - 原音のピークが0.90 (-1dBFS) に収まるよう均一スケーリング
+ */
+export function normalizeAndEnhanceAudio(samples: Float32Array): Float32Array {
+  if (!samples || samples.length === 0) return samples;
+
+  let peak = 0;
+  for (let i = 0; i < samples.length; i++) {
+    const a = Math.abs(samples[i]);
+    if (a > peak) peak = a;
+  }
+
+  // ほぼ無音の場合はそのまま
+  if (peak < 0.0001) return samples;
+
+  // 既に適正音量（0.5以上）なら過剰な増幅はせずそのまま（ノイズ持ち上げ防止）
+  if (peak >= 0.7) {
+    const output = new Float32Array(samples.length);
+    const gain = 0.92 / peak;
+    for (let i = 0; i < samples.length; i++) {
+      output[i] = Math.max(-1.0, Math.min(1.0, samples[i] * gain));
+    }
+    return output;
+  }
+
+  // 音量が小さい場合のみ、最大6倍まで安全に均一ブースト
+  const gain = Math.min(6.0, 0.90 / peak);
+  const output = new Float32Array(samples.length);
+  for (let i = 0; i < samples.length; i++) {
+    output[i] = Math.max(-1.0, Math.min(1.0, samples[i] * gain));
+  }
+  return output;
+}
+
+/**
+ * 任意の音声ファイル（WAV, MP3, M4A, AAC, OGG, FLAC等）を
+ * ブラウザ標準の最高精度・無歪みアンチエイリアシングで 16kHz モノラル Float32Array にピュアデコード
  */
 export async function decodeAudioTo16kMono(file: File): Promise<{
   audioData: Float32Array;
@@ -157,21 +195,12 @@ export async function decodeAudioTo16kMono(file: File): Promise<{
 }> {
   const arrayBuffer = await file.arrayBuffer();
 
-  // 1. WAVファイルの場合はブラウザのAudioContextメモリ上限を回避するバイナリデコーダーを最優先
-  if (file.name.toLowerCase().endsWith('.wav')) {
-    const wavParsed = parseWavTo16kMono(arrayBuffer);
-    if (wavParsed) {
-      return wavParsed;
-    }
-  }
-
-  // 2. MP3/M4A等の圧縮フォーマットは Web Audio API でデコード
   const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-  let decodedBuffer: AudioBuffer;
+  let decodedBuffer: AudioBuffer | null = null;
   try {
     decodedBuffer = await audioCtx.decodeAudioData(arrayBuffer);
   } catch (err: any) {
-    // もしMP3等でdecodeAudioDataが失敗した場合、WAVとして再試行
+    console.warn('Native decodeAudioData failed, trying pure WAV fallback parser:', err);
     const wavParsed = parseWavTo16kMono(arrayBuffer);
     if (wavParsed) {
       return wavParsed;
@@ -186,14 +215,19 @@ export async function decodeAudioTo16kMono(file: File): Promise<{
     Math.max(1, Math.ceil(durationSec * targetSampleRate)),
     targetSampleRate
   );
+
+  // 音声ソースから destination へ直接接続（フィルターやコンプレッサーを挟まず原音を100%保持）
   const source = offlineCtx.createBufferSource();
   source.buffer = decodedBuffer;
   source.connect(offlineCtx.destination);
   source.start(0);
 
   const resampledBuffer = await offlineCtx.startRendering();
+  const rawAudio = resampledBuffer.getChannelData(0);
+  const enhancedAudio = normalizeAndEnhanceAudio(rawAudio);
+
   return {
-    audioData: resampledBuffer.getChannelData(0),
+    audioData: enhancedAudio,
     durationSec
   };
 }

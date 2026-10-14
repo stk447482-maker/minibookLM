@@ -19,40 +19,37 @@ function formatTime(seconds: number): string {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
-// 🎯 VAD (Voice Activity Detection) - サブフレーム分割エネルギー判定
+// 🎯 VAD (Voice Activity Detection) - 適応型エネルギー判定（微小な小声・ささやき声の脱落を完全防止）
 function isSpeechActive(samples: Float32Array, sampleRate: number = 16000): boolean {
   if (!samples || samples.length === 0) return false;
   
-  const frameLength = Math.floor(sampleRate * 0.5); // 0.5秒フレーム (8000サンプル)
+  const frameLength = Math.floor(sampleRate * 0.5); // 0.5秒フレーム
   const totalFrames = Math.floor(samples.length / frameLength);
   if (totalFrames === 0) return false;
 
-  let activeFrameCount = 0;
   let totalEnergy = 0;
+  let maxPeak = 0;
 
   for (let f = 0; f < totalFrames; f++) {
     const start = f * frameLength;
     const end = Math.min(start + frameLength, samples.length);
     let sumSq = 0;
-    let peak = 0;
 
     for (let i = start; i < end; i += 4) {
       const absVal = Math.abs(samples[i]);
-      if (absVal > peak) peak = absVal;
+      if (absVal > maxPeak) maxPeak = absVal;
       sumSq += samples[i] * samples[i];
     }
     const frameRms = Math.sqrt(sumSq / ((end - start) / 4));
     totalEnergy += frameRms;
-
-    // 0.5秒区間内で音声レベルの音量とピークがあるか判定
-    if (frameRms > 0.0055 && peak > 0.018) {
-      activeFrameCount++;
-    }
   }
 
   const avgRms = totalEnergy / totalFrames;
-  // 30秒中で少なくとも1秒分（2フレーム以上）の明瞭な発話があり、平均RMSが閾値を超えていること
-  return activeFrameCount >= 2 && avgRms >= 0.0038;
+
+  // 🛡️ 粗悪・低音量音声の脱落防止:
+  // 完全な無音（デジタル無音・マイク未接続レベル: 平均RMS < 0.0003 かつ 最大ピーク < 0.001）のみを除外。
+  // 少しでも音響信号が存在する区間はWhisperに推論させ、フロントエンドでの誤切断を完全に防ぐ。
+  return avgRms >= 0.0003 || maxPeak >= 0.0015;
 }
 
 // 🛡️ Whisper特有の定型幻覚・ループ・時間ごとの同一文字列リピート（ハレーション）検知・除去
@@ -63,8 +60,6 @@ const KNOWN_HALLUCINATIONS = [
   /^[♪\s\-—_~～・.。:：;；,，]+$/
 ];
 
-// Rock-ON式 日本語アンカープロンプト（幻聴・音響誤認識を強力に抑止）
-const JAPANESE_ANCHOR_PROMPT = "以下は日本語の打ち合わせ・ビジネス会話・日常会話です。相槌、業務連絡、手続きに関する発話が含まれます。";
 
 function cleanWhisperText(rawText: string, recentTexts: string[]): string | null {
   let text = (rawText || '').trim();
@@ -159,36 +154,9 @@ async function ensureTranscriber(modelName: string = currentModelName) {
     currentModelName = modelName;
     return transcriber;
   } catch (err: unknown) {
-    console.warn(`モデル ${modelName} の初期化に失敗しました。軽量安定モデルへ自動フォールバック:`, err);
-
-    // Kotoba-Whisper等の大容量モデルでブラウザメモリ制限やMountedFilesエラーが発生した場合、
-    // 確実に動作する whisper-tiny (39MB) へ自動切替して文字起こしを継続
-    if (modelName !== 'onnx-community/whisper-tiny') {
-      self.postMessage({
-        type: 'STATUS',
-        status: 'fallback',
-        message: `${modelName} の端末メモリ制約のため、軽量安定モデル (whisper-tiny) へ自動切替中...`
-      });
-
-      try {
-        transcriber = await pipeline('automatic-speech-recognition', 'onnx-community/whisper-tiny', {
-          device: (typeof navigator !== 'undefined' && 'gpu' in navigator) ? 'webgpu' : 'wasm',
-          dtype: {
-            encoder_model: 'fp32',
-            decoder_model_merged: 'q4'
-          },
-          progress_callback: progressCallback
-        });
-        currentModelName = 'onnx-community/whisper-tiny';
-        return transcriber;
-      } catch (fallbackErr: unknown) {
-        const msg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
-        throw new Error(`音声認識モデル初期化エラー (フォールバック含む): ${msg}`);
-      }
-    }
-
     const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`音声認識モデル初期化エラー: ${msg}`);
+    // 🛡️ サイレント・フォールバック廃止: ユーザーに無断で超低精度な tiny に落とさず明確にエラー通知
+    throw new Error(`音声認識モデル (${modelName}) の初期化に失敗しました: ${msg}\n※ ブラウザのメモリ上限を回避するため、python server.py (Native) または Gemini API の使用を推奨します。`);
   }
 }
 
@@ -254,17 +222,12 @@ self.onmessage = async (e: MessageEvent) => {
           continue;
         }
 
-        // 🎯 2. 30秒ごとの推論を実行（repetition_penalty & no_repeat_ngram_size でループ抑制、プロンプトアンカー注入）
-        const promptAnchor = language === 'japanese' || language === 'ja' ? JAPANESE_ANCHOR_PROMPT : undefined;
+        // 🎯 2. 30秒ごとの推論を実行（プロンプト汚染を排除し、純粋な音響トークン認識に専念）
         const res = await transcriber(chunkAudio, {
           sampling_rate: sampleRate,
           language: language === 'auto' ? null : language,
           task: 'transcribe',
-          temperature: 0.0,
-          repetition_penalty: 1.25,
-          no_repeat_ngram_size: 3,
-          prompt: promptAnchor,
-          initial_prompt: promptAnchor
+          temperature: 0.0
         });
 
         // 🎯 3. ハルシネーション・時間ごとの同一文字列リピート検知＆除去

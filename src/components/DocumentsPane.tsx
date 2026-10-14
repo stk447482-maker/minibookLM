@@ -12,7 +12,9 @@ import {
   DownloadCloud,
   UploadCloud,
   Mic,
-  Eye
+  Eye,
+  ArrowRightLeft,
+  Copy
 } from 'lucide-react';
 import { DocumentSource, Project } from '../types/index.ts';
 
@@ -31,12 +33,14 @@ interface DocumentsPaneProps {
   onRemoveDoc: (id: string) => void;
   onRemoveAllDocs?: () => void;
   onViewDoc?: (doc: DocumentSource) => void;
+  onMoveDoc?: (docId: string, targetProjectId: string) => Promise<void>;
+  onCopyDoc?: (docId: string, targetProjectId: string) => Promise<void>;
   isProcessing: boolean;
   processProgress: number;
   processStatusText?: string;
   onCancelUpload?: () => void;
-  audioEngine?: 'auto' | 'gemini' | 'kotoba-whisper' | 'whisper-local' | 'native-kotoba' | 'native-large-v3';
-  onChangeAudioEngine?: (engine: 'auto' | 'gemini' | 'kotoba-whisper' | 'whisper-local' | 'native-kotoba' | 'native-large-v3') => void;
+  audioEngine?: 'auto' | 'gemini' | 'whisper-small' | 'whisper-large-v3' | 'kotoba-whisper' | 'native-large-v3' | 'native-kotoba' | 'whisper-local';
+  onChangeAudioEngine?: (engine: 'auto' | 'gemini' | 'whisper-small' | 'whisper-large-v3' | 'kotoba-whisper' | 'native-large-v3' | 'native-kotoba' | 'whisper-local') => void;
 }
 
 export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
@@ -54,6 +58,8 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
   onRemoveDoc,
   onRemoveAllDocs,
   onViewDoc,
+  onMoveDoc,
+  onCopyDoc,
   isProcessing,
   processProgress,
   processStatusText,
@@ -65,6 +71,10 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
   const importInputRef = useRef<HTMLInputElement>(null);
   const [isCreatingProj, setIsCreatingProj] = useState(false);
   const [newProjName, setNewProjName] = useState('');
+  const [transferDoc, setTransferDoc] = useState<DocumentSource | null>(null);
+  const [targetProjId, setTargetProjId] = useState<string>('');
+  const [transferMode, setTransferMode] = useState<'copy' | 'move'>('copy');
+  const [isTransferring, setIsTransferring] = useState(false);
 
   const enabledCount = documents.filter(d => d.enabled).length;
   const isAllSelected = documents.length > 0 && enabledCount === documents.length;
@@ -82,6 +92,32 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
     onCreateProject(newProjName.trim());
     setNewProjName('');
     setIsCreatingProj(false);
+  };
+
+  const handleOpenTransfer = (doc: DocumentSource) => {
+    setTransferDoc(doc);
+    const otherProjects = projects.filter(p => p.id !== activeProject?.id);
+    if (otherProjects.length > 0) {
+      setTargetProjId(otherProjects[0].id);
+    }
+  };
+
+  const handleExecuteTransfer = async () => {
+    if (!transferDoc || !targetProjId) return;
+    setIsTransferring(true);
+    try {
+      if (transferMode === 'move') {
+        if (onMoveDoc) await onMoveDoc(transferDoc.id, targetProjId);
+      } else {
+        if (onCopyDoc) await onCopyDoc(transferDoc.id, targetProjId);
+      }
+      setTransferDoc(null);
+    } catch (err) {
+      console.error('Transfer failed:', err);
+      alert('移動/コピーに失敗しました');
+    } finally {
+      setIsTransferring(false);
+    }
   };
 
   return (
@@ -227,16 +263,14 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
           </span>
         </div>
         <select
-          value={audioEngine || 'auto'}
+          value={audioEngine || 'whisper-small'}
           onChange={(e) => onChangeAudioEngine?.(e.target.value as any)}
           className="w-full bg-slate-900 border border-purple-500/40 rounded-lg px-2.5 py-1.5 text-xs text-purple-200 focus:outline-none focus:border-purple-400 font-medium"
         >
-          <option value="native-large-v3">👑 Whisper Large-v3 (FP16 Native・最高峰3GB)</option>
-          <option value="native-kotoba">🔥 Kotoba-Whisper (C++ Native・超高速)</option>
-          <option value="kotoba-whisper">🌐 Kotoba-Whisper v2.2 (WebGPU/PWA)</option>
-          <option value="auto">🚀 自動最適化 (Native優先 / WebGPUフォールバック)</option>
-          <option value="gemini">☁️ Gemini 1.5 Flash (超高速クラウド / 10秒解析)</option>
-          <option value="whisper-local">⚡ Whisper-Tiny (超軽量・英語/多言語)</option>
+          <option value="whisper-small">⚡ 選択肢A: Whisper Small (ローカル高速・約15分・完全無料)</option>
+          <option value="gemini">🚀 選択肢B: Gemini 1.5 Flash (超高速クラウド・約1分・要APIキー)</option>
+          <option value="whisper-large-v3">🎯 選択肢C: Whisper Large-v3 分割表示 (最高精度・進捗ストリーム)</option>
+          <option value="auto">🤖 自動判定 (ファイルサイズと接続に応じて最適選択)</option>
         </select>
       </div>
 
@@ -376,6 +410,19 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
                   </button>
                 )}
 
+                {projects.length > 1 && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleOpenTransfer(doc);
+                    }}
+                    className="p-1.5 hover:bg-cyan-500/20 text-slate-400 hover:text-cyan-300 rounded-lg transition-all"
+                    title="他のプロジェクトへ移動/コピー"
+                  >
+                    <ArrowRightLeft className="w-3.5 h-3.5" />
+                  </button>
+                )}
+
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -391,6 +438,101 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
           ))
         )}
       </div>
+
+      {/* プロジェクト間 移動 / コピー モーダル */}
+      {transferDoc && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-5 max-w-sm w-full shadow-2xl space-y-4">
+            <div>
+              <h3 className="text-sm font-bold text-slate-200 flex items-center">
+                <ArrowRightLeft className="w-4 h-4 mr-2 text-cyan-400" />
+                プロジェクト間 移動 / コピー
+              </h3>
+              <p className="text-xs text-slate-400 mt-1 truncate" title={transferDoc.title}>
+                対象: <span className="text-slate-200 font-medium">{transferDoc.title}</span>
+              </p>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-[11px] font-semibold text-slate-400 block mb-1">
+                  先頭のプロジェクトを選択:
+                </label>
+                <select
+                  value={targetProjId}
+                  onChange={(e) => setTargetProjId(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-xl px-3 py-2 outline-none focus:border-cyan-500"
+                >
+                  {projects
+                    .filter((p) => p.id !== activeProject?.id)
+                    .map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[11px] font-semibold text-slate-400 block mb-1">
+                  操作モード:
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setTransferMode('copy')}
+                    className={`flex items-center justify-center space-x-1.5 py-2 px-3 rounded-xl border text-xs font-medium transition-all ${
+                      transferMode === 'copy'
+                        ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-300'
+                        : 'bg-slate-800/60 border-slate-700/60 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>コピー (複製)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTransferMode('move')}
+                    className={`flex items-center justify-center space-x-1.5 py-2 px-3 rounded-xl border text-xs font-medium transition-all ${
+                      transferMode === 'move'
+                        ? 'bg-amber-500/20 border-amber-500/50 text-amber-300'
+                        : 'bg-slate-800/60 border-slate-700/60 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <ArrowRightLeft className="w-3.5 h-3.5" />
+                    <span>移動 (移行)</span>
+                  </button>
+                </div>
+                <p className="text-[10px] text-slate-500 mt-1">
+                  {transferMode === 'copy'
+                    ? '※ 元のプロジェクトにもデータを残したまま複製します。'
+                    : '※ 現在のプロジェクトからは削除され、先頭プロジェクトへ移ります。'}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end space-x-2 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setTransferDoc(null)}
+                disabled={isTransferring}
+                className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 rounded-lg transition-colors"
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteTransfer}
+                disabled={isTransferring || !targetProjId}
+                className="px-4 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold rounded-xl shadow-lg shadow-cyan-900/40 transition-all disabled:opacity-50 flex items-center space-x-1"
+              >
+                {isTransferring && <Loader2 className="w-3 h-3 animate-spin mr-1" />}
+                <span>{transferMode === 'copy' ? 'コピー実行' : '移動実行'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -323,6 +323,20 @@ export const App: React.FC = () => {
     await ragManager.loadProjectChunks([]);
   };
 
+  // ドキュメントのプロジェクト間移動
+  const handleMoveDoc = async (docId: string, targetProjectId: string) => {
+    if (!activeProject) return;
+    await dbService.moveDocument(docId, targetProjectId);
+    setDocuments(prev => prev.filter(d => d.id !== docId));
+    const remainingChunks = await dbService.getChunksByProject(activeProject.id);
+    await ragManager.loadProjectChunks(remainingChunks);
+  };
+
+  // ドキュメントのプロジェクト間コピー
+  const handleCopyDoc = async (docId: string, targetProjectId: string) => {
+    await dbService.copyDocument(docId, targetProjectId);
+  };
+
   // ドキュメント内容の直接編集・AI校正後の保存＆再インデックス
   const handleSaveDocumentContent = async (doc: DocumentSource, newContent: string) => {
     if (!activeProject) return;
@@ -416,12 +430,12 @@ export const App: React.FC = () => {
         maxContextChars = 60000;
       } else if (config.mode === 'desktop-api') {
         const mName = (config.desktopModelName || '').toLowerCase();
-        if (mName.includes('8b') || mName.includes('7b') || mName.includes('14b') || mName.includes('llama3') || mName.includes('qwen2.5-7b')) {
+        if (mName.includes('12b') || mName.includes('gemma') || mName.includes('8b') || mName.includes('7b') || mName.includes('9b') || mName.includes('14b') || mName.includes('llama3') || mName.includes('qwen')) {
           modelTier = 3;
-          maxContextChars = 12000;
+          maxContextChars = 24000;
         } else {
-          modelTier = 2;
-          maxContextChars = 4000;
+          modelTier = 3;
+          maxContextChars = 16000;
         }
       } else {
         // embedded-mobile (WebGPU)
@@ -667,14 +681,14 @@ ${searchResults.map(s => `[資料: ${s.docTitle}]\n${s.fullContext}`).join('\n\n
     try {
       const enabledDocIds = enabledDocs.map(d => d.id);
 
-      // 🎯 モデルTierに応じた安全なStudioコンテキスト文字数予算
-      let studioContextMaxChars = 2200;
-      if (config.mode === 'cloud-gemini' || config.cloudApiKey) {
-        studioContextMaxChars = 30000;
-      } else if (config.mode === 'desktop-api') {
-        studioContextMaxChars = 8000;
-      } else if (config.embeddedModelId.includes('0.5B')) {
-        studioContextMaxChars = 1400;
+      // 🎯 現在の高性能モデル構成（Gemma 12B QAT / Gemini）に最適化した大容量Studioコンテキスト予算
+      let studioContextMaxChars = 16000;
+      if (config.mode === 'cloud-gemini') {
+        studioContextMaxChars = 80000; // Gemini 1.5/2.0 Flash (100万トークン対応・長尺会議全文一括投入)
+      } else if (config.mode === 'desktop-api' || config.mode === 'lmstudio') {
+        studioContextMaxChars = 24000; // LM Studio / Gemma-4-12B-QAT (8K-16Kトークン対応・約2.4万文字)
+      } else if (config.embeddedModelId?.includes('0.5B')) {
+        studioContextMaxChars = 3000;
       }
 
       const { contextText: fullContext, docTitles } = await ragManager.getStudioOptimizedContext(
@@ -687,15 +701,31 @@ ${searchResults.map(s => `[資料: ${s.docTitle}]\n${s.fullContext}`).join('\n\n
       let prompt = '';
       let title = '';
 
-      const userRequirement = customPrompt ? `\n【ユーザー指示】: ${customPrompt}\n` : '';
+      const userRequirement = customPrompt ? `\n【ユーザー追加指示】: ${customPrompt}\n` : '';
 
-      const studioSystemPrompt = `あなたは最高峰のドキュメントアナリストです。提供された【参照ドキュメント】の数値・固有名詞・規定を正確に引用し、要求された形式で高品質な出力を生成してください。`;
+      // google/gemma-4-12b-qat や Whisper Large-v3 が稼働している場合、ハイエンド推論プロンプトを適用
+      const isHighEndModel = config.mode === 'desktop-api' || config.mode === 'lmstudio' || config.mode === 'cloud-gemini';
+      const hasAudioTranscript = enabledDocs.some(d => d.type === 'audio' || d.contentPreview?.includes('🎙️'));
+
+      const studioSystemPrompt = isHighEndModel
+        ? `あなたはgoogle/gemma-4-12b-qatおよび先進AIモデルに最適化された最高峰のドキュメント・音声議事録アナリストです。提供された資料（Whisper Large-v3による高精度音声文字起こしを含む）のファクト、確定事項、数値、議論の文脈、発言意図を一切のハルシネーションなく厳密に分析し、極めて高品質な構造化アウトプットを生成してください。`
+        : `あなたは最高峰のドキュメントアナリストです。提供された【参照ドキュメント】の数値・固有名詞・規定を正確に引用し、要求された形式で高品質な出力を生成してください。`;
 
       if (type === 'briefing') {
         title = customPrompt ? `要約: ${customPrompt.slice(0, 15)}...` : 'ドキュメント全体要約サマリー';
-        prompt = `以下の資料群の内容を分かりやすく網羅的にまとめた【ドキュメント要約サマリー】を作成してください。
-形式や見出しに縛られすぎず、資料のテーマ・重要ポイント・具体的な数値や規定・結論を自然で読みやすいMarkdown形式でまとめてください。
+        prompt = isHighEndModel
+          ? `以下の資料群（Whisper音声文字起こし・ドキュメント）を深く分析し、google/gemma-4-12b-qatの推論力を活かした包括的で詳細な【エグゼクティブ要約サマリー】を作成してください。単なる表面的な要約ではなく、背景、主要論点、具体的数値、結論・意思決定を論理的に構造化してください。
 
+# 📑 エグゼクティブ要約サマリー (${docTitles.join(', ')})
+### 💡 全体概要・背景と目的
+### 📌 主要論点・議論の推移
+### 📊 確定数値・重要仕様・合意規定
+### 📝 結論および今後の方向性
+${userRequirement}
+
+【参照資料】
+${fullContext}`
+          : `以下の資料群の内容を分かりやすく網羅的にまとめた【ドキュメント要約サマリー】を作成してください。
 # 📑 ドキュメント要約サマリー (${docTitles.join(', ')})
 ### 💡 全体概要・目的
 ### 📌 主要なポイント・重要事項
@@ -706,8 +736,22 @@ ${userRequirement}
 【参照資料】
 ${fullContext}`;
       } else if (type === 'minutes') {
-        title = customPrompt ? `議事録: ${customPrompt.slice(0, 15)}...` : '会議議事録・決定事項';
-        prompt = `以下の資料から、決定事項や議論の要点を分かりやすく整理した【議事録・決定事項サマリー】を作成してください。
+        title = customPrompt ? `議事録: ${customPrompt.slice(0, 15)}...` : '会議議事録・決定事項・ToDo';
+        prompt = hasAudioTranscript || isHighEndModel
+          ? `以下の資料群（Whisper Large-v3の音声文字起こしを含む）から、実際の会議・対話の文脈を精密に再構成した【実践的 会議議事録＆アクションプラン】を作成してください。発言の文脈、合意事項、未決事項、および具体的なToDo（担当・内容）を漏れなく整理してください。
+
+# 📝 実践的 会議議事録＆アクションプラン
+- **対象資料**: ${docTitles.join(', ')}
+## 1. 会議の目的・主要アジェンダ
+## 2. 決定事項・合意内容（確定事項を箇条書き）
+## 3. 議論の経緯・主要な論点（意見の相違や検討された選択肢）
+## 4. 保留・次回持ち越し課題
+## 5. アクションアイテム / ToDo一覧（担当者・期限・タスク内容を表形式またはリスト形式で明記）
+${userRequirement}
+
+【参照資料】
+${fullContext}`
+          : `以下の資料から、決定事項や議論の要点を分かりやすく整理した【議事録・決定事項サマリー】を作成してください。
 # 📝 議事録・決定事項サマリー
 - **対象資料**: ${docTitles.join(', ')}
 ## 1. 目的・主要テーマ
@@ -955,11 +999,13 @@ ${fullContext}`;
             onRemoveDoc={handleRemoveDoc}
             onRemoveAllDocs={handleRemoveAllDocs}
             onViewDoc={(doc) => setSelectedDocForModal(doc)}
+            onMoveDoc={handleMoveDoc}
+            onCopyDoc={handleCopyDoc}
             isProcessing={isProcessingDoc}
             processProgress={docProgress}
             processStatusText={docStatusText}
             onCancelUpload={handleCancelUpload}
-            audioEngine={config.audioTranscriptionEngine || 'kotoba-whisper'}
+            audioEngine={config.audioTranscriptionEngine || 'native-large-v3'}
             onChangeAudioEngine={(engine) => {
               handleUpdateConfig({ ...config, audioTranscriptionEngine: engine });
             }}
@@ -990,6 +1036,7 @@ ${fullContext}`;
           }`}
         >
           <StudioPane
+            config={config}
             artifacts={artifacts}
             streamingArtifact={streamingStudioArtifact}
             enabledDocsCount={documents.filter(d => d.enabled).length}
