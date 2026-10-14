@@ -28,6 +28,7 @@ import { MermaidViewer } from './studio/MermaidViewer.tsx';
 import { SlideViewer } from './studio/SlideViewer.tsx';
 import { PodcastPlayer } from './studio/PodcastPlayer.tsx';
 import { Graph3DViewer } from './studio/Graph3DViewer.tsx';
+import { FaqViewer } from './studio/FaqViewer.tsx';
 
 interface StudioPaneProps {
   config?: ModelConfig;
@@ -561,6 +562,8 @@ ${currentArtifact.content}
                 <Graph3DViewer dataString={currentArtifact.content} />
               ) : activeTab === 'podcast' ? (
                 <PodcastPlayer script={currentArtifact.content} config={config} />
+              ) : activeTab === 'faq' ? (
+                <FaqViewer content={currentArtifact.content} />
               ) : (
                 <div
                   className="prose prose-invert prose-sm max-w-none text-xs leading-relaxed"
