@@ -318,6 +318,48 @@ export const App: React.FC = () => {
     }
   };
 
+  // 🧠 通常資料 ⇄ AI補助脳 の相互昇格・切り替え
+  const handleToggleAuxiliaryBrain = async (doc: DocumentSource) => {
+    if (!activeProject) return;
+
+    const isCurrentlyBrain = doc.title.includes('AI補助脳');
+    let newTitle: string;
+
+    if (isCurrentlyBrain) {
+      // 補助脳から解除（プレフィックスを除去）
+      newTitle = doc.title.replace(/^\[AI補助脳(?::\s*[^\]]+)?\]\s*/, '').trim();
+    } else {
+      // 補助脳に昇格（プレフィックスを付与）
+      newTitle = `[AI補助脳: ${doc.type.toUpperCase()}] ${doc.title}`;
+    }
+
+    const updatedDoc: DocumentSource = {
+      ...doc,
+      title: newTitle
+    };
+
+    // 1. Documents状態およびIndexedDBを更新
+    setDocuments(prev => prev.map(d => d.id === doc.id ? updatedDoc : d));
+    await dbService.saveDocument(updatedDoc);
+
+    // 2. チャンク側のdocTitleも更新
+    const docChunks = await dbService.getChunksByDocId(doc.id);
+    for (const chunk of docChunks) {
+      chunk.docTitle = newTitle;
+    }
+    await dbService.saveChunks(docChunks);
+
+    // 3. 検索ワーカーへ更新済みチャンクを同期
+    const allProjectChunks = await dbService.getChunksByProject(activeProject.id);
+    await ragManager.loadProjectChunks(allProjectChunks);
+
+    if (isCurrentlyBrain) {
+      showToast('info', `「${newTitle}」を通常の資料に戻しました`, '補助脳解除');
+    } else {
+      showToast('success', `「${newTitle}」をAI補助脳に昇格・重み付け登録しました！`, '🧠 補助脳登録');
+    }
+  };
+
   // ドキュメント削除
   const handleRemoveDoc = async (id: string) => {
     if (!activeProject) return;
@@ -1141,6 +1183,7 @@ ${fullContext}`;
             onRemoveDoc={handleRemoveDoc}
             onRemoveAllDocs={handleRemoveAllDocs}
             onViewDoc={(doc) => setSelectedDocForModal(doc)}
+            onToggleAuxiliaryBrain={handleToggleAuxiliaryBrain}
             onMoveDoc={handleMoveDoc}
             onCopyDoc={handleCopyDoc}
             isProcessing={isProcessingDoc}

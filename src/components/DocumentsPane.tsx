@@ -34,6 +34,7 @@ interface DocumentsPaneProps {
   onRemoveDoc: (id: string) => void;
   onRemoveAllDocs?: () => void;
   onViewDoc?: (doc: DocumentSource) => void;
+  onToggleAuxiliaryBrain?: (doc: DocumentSource) => Promise<void>;
   onMoveDoc?: (docId: string, targetProjectId: string) => Promise<void>;
   onCopyDoc?: (docId: string, targetProjectId: string) => Promise<void>;
   isProcessing: boolean;
@@ -59,6 +60,7 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
   onRemoveDoc,
   onRemoveAllDocs,
   onViewDoc,
+  onToggleAuxiliaryBrain,
   onMoveDoc,
   onCopyDoc,
   isProcessing,
@@ -454,6 +456,27 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
               </div>
 
               <div className="flex items-center space-x-0.5 ml-1 shrink-0">
+                {onToggleAuxiliaryBrain && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onToggleAuxiliaryBrain(doc);
+                    }}
+                    className={`p-1.5 rounded-lg transition-all ${
+                      doc.title.includes('AI補助脳')
+                        ? 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/30'
+                        : 'hover:bg-indigo-500/20 text-slate-400 hover:text-amber-300'
+                    }`}
+                    title={
+                      doc.title.includes('AI補助脳')
+                        ? '🧠 補助脳から解除（通常の資料に戻す）'
+                        : '🧠 補助脳に追加（コア知識として最優先昇格）'
+                    }
+                  >
+                    <Sparkles className={`w-3.5 h-3.5 ${doc.title.includes('AI補助脳') ? 'fill-amber-300' : ''}`} />
+                  </button>
+                )}
+
                 {onViewDoc && (
                   <button
                     onClick={(e) => {
