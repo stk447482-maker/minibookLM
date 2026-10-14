@@ -193,8 +193,8 @@ export const PodcastPlayer: React.FC<PodcastPlayerProps> = ({ script, config }) 
           const speakerLabel = line.isHost ? 'アレックス (ホスト)' : 'サクラ (解説)';
           setSynthesisStatus(`[${i + 1}/${parsedLines.length}] ${speakerLabel} をローカル推論中...`);
 
-          // Kokoro-82M v1.0 日本語ボイス: ホスト(男性)=jm_kurosu, ゲスト(女性)=jf_alpha
-          const voice = line.isHost ? 'jm_kurosu' : 'jf_alpha';
+          // Kokoro-82M 有効ボイス: ホスト(男性)=am_adam, ゲスト(女性)=af_bella (最高品質ボイス)
+          const voice = line.isHost ? 'am_adam' : 'af_bella';
           const pcmData: { audioData: Float32Array; samplingRate: number } = await new Promise((resolve, reject) => {
             const lineTimer = setTimeout(() => {
               worker.removeEventListener('message', onMsg);

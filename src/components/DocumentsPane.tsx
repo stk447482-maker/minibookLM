@@ -14,7 +14,8 @@ import {
   Mic,
   Eye,
   ArrowRightLeft,
-  Copy
+  Copy,
+  Sparkles
 } from 'lucide-react';
 import { DocumentSource, Project } from '../types/index.ts';
 
@@ -75,6 +76,7 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
   const [targetProjId, setTargetProjId] = useState<string>('');
   const [transferMode, setTransferMode] = useState<'copy' | 'move'>('copy');
   const [isTransferring, setIsTransferring] = useState(false);
+  const [filterTab, setFilterTab] = useState<'all' | 'files' | 'brain'>('all');
 
   const enabledCount = documents.filter(d => d.enabled).length;
   const isAllSelected = documents.length > 0 && enabledCount === documents.length;
@@ -218,6 +220,44 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
         )}
       </div>
 
+      {/* 📂 / 🧠 フィルタータブ */}
+      <div className="flex items-center space-x-1 mb-2.5 p-1 bg-slate-900/80 rounded-xl border border-slate-800 text-[11px] font-semibold">
+        <button
+          type="button"
+          onClick={() => setFilterTab('all')}
+          className={`flex-1 py-1 rounded-lg text-center transition-all ${
+            filterTab === 'all'
+              ? 'bg-slate-800 text-slate-100 shadow-sm border border-slate-700/60'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          すべて ({documents.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setFilterTab('files')}
+          className={`flex-1 py-1 rounded-lg text-center transition-all ${
+            filterTab === 'files'
+              ? 'bg-slate-800 text-indigo-300 shadow-sm border border-slate-700/60'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          📄 資料 ({documents.filter(d => !d.title.includes('AI補助脳')).length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setFilterTab('brain')}
+          className={`flex-1 py-1 rounded-lg text-center transition-all flex items-center justify-center space-x-1 ${
+            filterTab === 'brain'
+              ? 'bg-indigo-600/30 text-indigo-200 shadow-sm border border-indigo-500/40'
+              : 'text-indigo-400/70 hover:text-indigo-300'
+          }`}
+        >
+          <Sparkles className="w-3 h-3 text-amber-300 fill-amber-300" />
+          <span>🧠 補助脳 ({documents.filter(d => d.title.includes('AI補助脳')).length})</span>
+        </button>
+      </div>
+
       {/* ソース操作バー */}
       <div className="flex items-center justify-between mb-3 px-1">
         <div className="flex items-center space-x-2">
@@ -339,7 +379,14 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
             ファイルをアップロードすると自動保存されます。
           </div>
         ) : (
-          documents.map((doc) => (
+          documents
+            .filter((doc) => {
+              const isBrain = doc.title.includes('AI補助脳');
+              if (filterTab === 'brain') return isBrain;
+              if (filterTab === 'files') return !isBrain;
+              return true;
+            })
+            .map((doc) => (
             <div
               key={doc.id}
               className={`group p-2.5 rounded-xl border transition-all flex items-start justify-between ${
@@ -361,11 +408,17 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
                 </button>
 
                 <div className={`p-1 rounded mt-0.5 ${
-                  doc.type === 'audio' || doc.type === 'video'
-                    ? 'bg-purple-500/10 text-purple-400'
-                    : 'bg-indigo-500/10 text-indigo-400'
+                  doc.title.includes('AI補助脳')
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                    : doc.type === 'audio' || doc.type === 'video'
+                      ? 'bg-purple-500/10 text-purple-400'
+                      : 'bg-indigo-500/10 text-indigo-400'
                 }`}>
-                  <FileText className="w-3.5 h-3.5" />
+                  {doc.title.includes('AI補助脳') ? (
+                    <Sparkles className="w-3.5 h-3.5 fill-amber-300" />
+                  ) : (
+                    <FileText className="w-3.5 h-3.5" />
+                  )}
                 </div>
 
                 <div
@@ -382,9 +435,13 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
                     </span>
                     <span>•</span>
                     <span className={`font-mono px-1 py-0.2 rounded text-[9px] ${
-                      doc.type === 'audio' ? 'bg-purple-900/60 text-purple-300 border border-purple-700/50' : 'text-cyan-300'
+                      doc.title.includes('AI補助脳')
+                        ? 'bg-indigo-900/60 text-indigo-200 border border-indigo-600/40 font-bold'
+                        : doc.type === 'audio'
+                          ? 'bg-purple-900/60 text-purple-300 border border-purple-700/50'
+                          : 'text-cyan-300'
                     }`}>
-                      {doc.type === 'audio' ? '🎙️ 音声' : doc.type.toUpperCase()}
+                      {doc.title.includes('AI補助脳') ? '🧠 補助脳' : doc.type === 'audio' ? '🎙️ 音声' : doc.type.toUpperCase()}
                     </span>
                   </div>
                   {doc.contentPreview?.includes('音声トラックがドキュメントとして登録されました') && (
