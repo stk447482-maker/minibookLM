@@ -68,15 +68,24 @@ export const PodcastPlayer: React.FC<PodcastPlayerProps> = ({ script, config: _c
     const utterance = new SpeechSynthesisUtterance(line.text);
     utterance.lang = 'ja-JP';
 
-    // ホスト（男声寄り: ピッチ0.85）とゲスト（女声寄り: ピッチ1.2）
-    utterance.pitch = line.isHost ? 0.85 : 1.2;
-    utterance.rate = 1.05;
+    // ホスト（男声寄り: ピッチ0.92, レート1.0）とゲスト（女声寄り: ピッチ1.15, レート1.05）
+    utterance.pitch = line.isHost ? 0.92 : 1.15;
+    utterance.rate = line.isHost ? 1.02 : 1.08;
 
-    // 日本語音声の取得
+    // ブラウザにインストールされている最高品質の日本語音声を探索（Google日本語、Microsoft Natural、Kyoko/Otoya等）
     const voices = window.speechSynthesis.getVoices();
-    const jaVoices = voices.filter(v => v.lang.includes('ja'));
+    const jaVoices = voices.filter(v => v.lang.startsWith('ja') || v.lang.includes('JP'));
+
     if (jaVoices.length > 0) {
-      utterance.voice = line.isHost ? jaVoices[0] : (jaVoices[1] || jaVoices[0]);
+      // 男声系（Ichiro, Keita, Otoya, 男性名）と女声系（Haruka, Ayumi, Nanami, Sayaka, Kyoko, Google日本語）を優先分離
+      const maleVoice = jaVoices.find(v => /ichiro|keita|otoya|male|男/i.test(v.name));
+      const femaleVoice = jaVoices.find(v => /haruka|ayumi|nanami|sayaka|kyoko|female|女|google/i.test(v.name));
+
+      if (line.isHost) {
+        utterance.voice = maleVoice || jaVoices[0];
+      } else {
+        utterance.voice = femaleVoice || (jaVoices.length > 1 ? jaVoices[1] : jaVoices[0]);
+      }
     }
 
     utterance.onend = () => {
