@@ -548,10 +548,11 @@ ${timeHint}`;
     apiKey: string,
     text: string,
     isHost: boolean,
+    speakingRate: number = 1.05,
     abortSignal?: AbortSignal
   ): Promise<Uint8Array> {
     const voiceName = isHost ? 'ja-JP-Neural2-C' : 'ja-JP-Neural2-B';
-    const speakingRate = isHost ? 1.05 : 1.1;
+    const rate = isHost ? speakingRate : speakingRate * 1.05;
     const pitch = isHost ? -1.0 : 1.5;
 
     const url = `https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`;
@@ -564,7 +565,7 @@ ${timeHint}`;
       audioConfig: {
         audioEncoding: 'LINEAR16', // WAV (PCM)
         sampleRateHertz: 24000,
-        speakingRate,
+        speakingRate: Math.max(0.7, Math.min(1.8, rate)),
         pitch
       }
     };
@@ -593,6 +594,82 @@ ${timeHint}`;
       bytes[i] = binaryStr.charCodeAt(i);
     }
     return bytes;
+  }
+
+  // 5. 案B: VOICEVOX 音声合成 (ローカル 50021 または Web API)
+  public async synthesizeSpeechWithVoicevox(
+    text: string,
+    isHost: boolean,
+    speakingRate: number = 1.05,
+    abortSignal?: AbortSignal
+  ): Promise<Uint8Array> {
+    // ホスト: 青山龍星(ID: 13) or 剣崎雌雄(ID: 21), ゲスト: 四国めたん(ID: 2) or ずんだもん(ID: 3)
+    const speakerId = isHost ? 13 : 2;
+
+    // 1. ローカル VOICEVOX エンジン (http://127.0.0.1:50021) を優先トライ
+    try {
+      const queryRes = await fetch(`http://127.0.0.1:50021/audio_query?text=${encodeURIComponent(text)}&speaker=${speakerId}`, {
+        method: 'POST',
+        signal: abortSignal
+      });
+
+      if (queryRes.ok) {
+        const queryJson = await queryRes.json();
+        queryJson.speedScale = speakingRate; // 会話速度
+
+        const synthRes = await fetch(`http://127.0.0.1:50021/synthesis?speaker=${speakerId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(queryJson),
+          signal: abortSignal
+        });
+
+        if (synthRes.ok) {
+          const arrayBuf = await synthRes.arrayBuffer();
+          return new Uint8Array(arrayBuf);
+        }
+      }
+    } catch {
+      // ローカルが動いていない場合はWebフォールバックへ進む
+    }
+
+    // 2. WEB版 VOICEVOX API (TTS Quest API) へフォールバック
+    const webApiUrl = `https://api.tts.quest/v3/voicevox/synthesis?speaker=${speakerId}&text=${encodeURIComponent(text)}`;
+    const webRes = await fetch(webApiUrl, { signal: abortSignal });
+
+    if (!webRes.ok) {
+      throw new Error(`VOICEVOX Web API 接続エラー (${webRes.status})`);
+    }
+
+    const webData = await webRes.json();
+    if (!webData.success && !webData.wavDownloadUrl && !webData.mp3DownloadUrl) {
+      throw new Error(webData.errorMessage || 'VOICEVOX音声の生成に失敗しました');
+    }
+
+    // 音声ファイルのダウンロード（最大15秒待機ポーリング）
+    const audioDownloadUrl = webData.wavDownloadUrl || webData.mp3DownloadUrl;
+    let audioBytes: Uint8Array | null = null;
+
+    for (let retry = 0; retry < 12; retry++) {
+      if (abortSignal?.aborted) break;
+      try {
+        const audioFetch = await fetch(audioDownloadUrl, { signal: abortSignal });
+        if (audioFetch.ok) {
+          const ab = await audioFetch.arrayBuffer();
+          if (ab.byteLength > 2000) {
+            audioBytes = new Uint8Array(ab);
+            break;
+          }
+        }
+      } catch {}
+      await new Promise(r => setTimeout(r, 1200));
+    }
+
+    if (!audioBytes) {
+      throw new Error('VOICEVOX音声のダウンロードが完了しませんでした。VOICEVOXアプリをローカル起動(http://127.0.0.1:50021)するか、Googleモードをお試しください。');
+    }
+
+    return audioBytes;
   }
 }
 

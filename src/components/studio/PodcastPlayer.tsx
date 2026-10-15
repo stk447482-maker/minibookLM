@@ -113,7 +113,8 @@ export const PodcastPlayer: React.FC<PodcastPlayerProps> = ({ script, config }) 
     }
   };
 
-  const [engineMode, setEngineMode] = useState<'google' | 'kokoro'>('google');
+  const [engineMode, setEngineMode] = useState<'google' | 'voicevox' | 'kokoro'>('google');
+  const [speakingRate, setSpeakingRate] = useState<number>(1.05);
   const ttsWorkerRef = useRef<Worker | null>(null);
 
   const handleReset = () => {
@@ -227,11 +228,36 @@ export const PodcastPlayer: React.FC<PodcastPlayerProps> = ({ script, config }) 
           audioBuffers.push(new Float32Array(pauseSamples));
           setSynthesisProgress(10 + Math.round(((i + 1) / parsedLines.length) * 85));
         }
+      } else if (engineMode === 'voicevox') {
+        // --- 🎌 VOICEVOX (案B: 日本語完璧・自然な肉声TTS) ---
+        sampleRate = 24000;
+        setSynthesisStatus('VOICEVOX 音声合成エンジンに接続中...');
+        const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+
+        for (let i = 0; i < parsedLines.length; i++) {
+          const line = parsedLines[i];
+          const speakerLabel = line.isHost ? '青山龍星 (ホスト)' : '四国めたん (解説)';
+          setSynthesisStatus(`[${i + 1}/${parsedLines.length}] ${speakerLabel} を音声合成中...`);
+
+          const audioBytes = await llmService.synthesizeSpeechWithVoicevox(line.text, line.isHost, speakingRate);
+          
+          // AudioContext でデコードして Float32Array を抽出
+          const arrayBufferCopy = audioBytes.buffer.slice(audioBytes.byteOffset, audioBytes.byteOffset + audioBytes.byteLength) as ArrayBuffer;
+          const audioBuffer = await audioCtx.decodeAudioData(arrayBufferCopy);
+          const channelData = audioBuffer.getChannelData(0);
+          sampleRate = audioBuffer.sampleRate;
+
+          audioBuffers.push(new Float32Array(channelData));
+          const pauseSamples = Math.floor(0.25 * sampleRate);
+          audioBuffers.push(new Float32Array(pauseSamples));
+
+          setSynthesisProgress(5 + Math.round(((i + 1) / parsedLines.length) * 90));
+        }
       } else {
         // --- ☁️ Google Cloud Neural2 ---
         const apiKey = config?.cloudApiKey;
         if (!apiKey) {
-          alert('Google Neural2 音声合成には、右上の「設定」からGemini APIキーの登録が必要です。\n（※APIキー不要で使いたい場合は「⚡ Kokoro WebGPU」を選択してください）');
+          alert('Google Neural2 音声合成には、右上の「設定」からGemini APIキーの登録が必要です。\n（※APIキー不要で使いたい場合は「🎌 VOICEVOX」または「⚡ Kokoro」を選択してください）');
           setIsSynthesizing(false);
           return;
         }
@@ -242,7 +268,7 @@ export const PodcastPlayer: React.FC<PodcastPlayerProps> = ({ script, config }) 
           const speakerLabel = line.isHost ? 'アレックス (ホスト)' : 'サクラ (解説)';
           setSynthesisStatus(`[${i + 1}/${parsedLines.length}] ${speakerLabel} を音声合成中...`);
 
-          const pcmBytes = await llmService.synthesizeSpeechWithGoogle(apiKey, line.text, line.isHost);
+          const pcmBytes = await llmService.synthesizeSpeechWithGoogle(apiKey, line.text, line.isHost, speakingRate);
           const dataOffset = pcmBytes.length > 44 && String.fromCharCode(...pcmBytes.slice(0, 4)) === 'RIFF' ? 44 : 0;
           const pcmView = new DataView(pcmBytes.buffer, pcmBytes.byteOffset + dataOffset, pcmBytes.byteLength - dataOffset);
           const numSamples = Math.floor(pcmView.byteLength / 2);
@@ -314,33 +340,63 @@ export const PodcastPlayer: React.FC<PodcastPlayerProps> = ({ script, config }) 
           </div>
 
           <div className="flex items-center space-x-2">
-            {/* エンジン切り替えタブ */}
+            {/* エンジン切り替えタブ & 速度調整 */}
             {!synthesizedAudioUrl && (
-              <div className="flex items-center bg-slate-800/80 p-0.5 rounded-xl border border-slate-700 text-[10px] font-semibold">
-                <button
-                  type="button"
-                  onClick={() => setEngineMode('google')}
-                  className={`px-2 py-1 rounded-lg transition-all ${
-                    engineMode === 'google'
-                      ? 'bg-indigo-600 text-white shadow-sm'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                  title="Google Neural2: 最高品質・自然な対話（Gemini APIキー利用）"
-                >
-                  ☁️ Google
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setEngineMode('kokoro')}
-                  className={`px-2 py-1 rounded-lg transition-all ${
-                    engineMode === 'kokoro'
-                      ? 'bg-amber-600 text-white shadow-sm'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                  title="Kokoro-82M: ローカルWebGPU完全無料・高速実行"
-                >
-                  ⚡ Kokoro
-                </button>
+              <div className="flex items-center space-x-2">
+                <div className="flex items-center bg-slate-800/80 p-0.5 rounded-xl border border-slate-700 text-[10px] font-semibold">
+                  <button
+                    type="button"
+                    onClick={() => setEngineMode('voicevox')}
+                    className={`px-2 py-1 rounded-lg transition-all ${
+                      engineMode === 'voicevox'
+                        ? 'bg-emerald-600 text-white shadow-sm'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                    title="VOICEVOX (案B): 日本語イントネーション完璧・自然な人間対話（青山龍星 & 四国めたん）"
+                  >
+                    🎌 VOICEVOX
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEngineMode('google')}
+                    className={`px-2 py-1 rounded-lg transition-all ${
+                      engineMode === 'google'
+                        ? 'bg-indigo-600 text-white shadow-sm'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                    title="Google Neural2: 高品質・Gemini API連携"
+                  >
+                    ☁️ Google
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEngineMode('kokoro')}
+                    className={`px-2 py-1 rounded-lg transition-all ${
+                      engineMode === 'kokoro'
+                        ? 'bg-amber-600 text-white shadow-sm'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                    title="Kokoro-82M: ローカルWebGPU完全無料"
+                  >
+                    ⚡ Kokoro
+                  </button>
+                </div>
+
+                {/* 会話速度セレクター */}
+                <div className="flex items-center space-x-1 bg-slate-800/80 px-2 py-1 rounded-xl border border-slate-700 text-[10px]">
+                  <span className="text-slate-400 font-medium">⚡速度:</span>
+                  <select
+                    value={speakingRate}
+                    onChange={(e) => setSpeakingRate(parseFloat(e.target.value))}
+                    className="bg-transparent text-slate-200 font-bold outline-none cursor-pointer"
+                  >
+                    <option value="0.85" className="bg-slate-900 text-slate-100">0.85x (ゆっくり)</option>
+                    <option value="1.0" className="bg-slate-900 text-slate-100">1.0x (標準)</option>
+                    <option value="1.1" className="bg-slate-900 text-slate-100">1.1x (軽快)</option>
+                    <option value="1.2" className="bg-slate-900 text-slate-100">1.2x (速め)</option>
+                    <option value="1.35" className="bg-slate-900 text-slate-100">1.35x (倍速)</option>
+                  </select>
+                </div>
               </div>
             )}
 
