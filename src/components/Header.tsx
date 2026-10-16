@@ -120,6 +120,13 @@ export const Header: React.FC<HeaderProps> = ({
               <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
               <span>☁️ Gemini 1.5 Flash</span>
             </>
+          ) : config.mode === 'sarashina' ? (
+            <>
+              <span className="w-2 h-2 rounded-full bg-pink-400 animate-pulse"></span>
+              <span className="text-pink-300 font-semibold truncate max-w-[200px]">
+                🌸 Sarashina: {config.sarashinaModelName || 'sarashina3-mini'}
+              </span>
+            </>
           ) : (
             <>
               <Zap className="w-3.5 h-3.5 text-emerald-400 fill-emerald-400" />
