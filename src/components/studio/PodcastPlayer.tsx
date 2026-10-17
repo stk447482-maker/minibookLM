@@ -327,146 +327,145 @@ export const PodcastPlayer: React.FC<PodcastPlayerProps> = ({ script, config }) 
 
   return (
     <div className="space-y-4">
-      {/* プレーヤーコントロール */}
-      <div className="bg-gradient-to-r from-indigo-950/80 via-slate-900 to-violet-950/80 border border-indigo-500/30 rounded-2xl p-4 shadow-xl space-y-3">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-          <div className="flex items-center space-x-3">
-            <div className="w-12 h-12 rounded-xl bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center text-indigo-400 shrink-0">
-              <Mic className="w-6 h-6" />
+      {/* プレーヤーコントロール（洗練されたモダンオーディオデッキ） */}
+      <div className="bg-gradient-to-b from-slate-900 to-indigo-950/70 border border-indigo-500/30 rounded-2xl p-4 shadow-xl space-y-4">
+        {/* 上段: ステータス ＆ 設定バー */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-3 border-b border-slate-800/80 gap-2.5">
+          <div className="flex items-center space-x-2.5">
+            <div className="w-8 h-8 rounded-lg bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shrink-0">
+              <Mic className="w-4 h-4" />
             </div>
             <div>
-              <h4 className="text-xs font-bold text-slate-100 flex items-center space-x-1.5">
-                <span>AI ポッドキャスト オーディオ</span>
-                <span className="text-[10px] px-1.5 py-0.2 rounded bg-indigo-500/20 text-indigo-300 font-mono border border-indigo-500/30">
-                  2話者対話
+              <h4 className="text-xs font-bold text-slate-100 flex items-center gap-1.5">
+                <span>AI ポッドキャスト</span>
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 font-mono border border-indigo-500/30">
+                  2話者対話 ({parsedLines.length} 行)
                 </span>
               </h4>
-              <p className="text-[10px] text-slate-400">
-                {isPlaying ? '🎙️ 再生中' : '⏹️ 停止中'} • {currentLineIndex} / {parsedLines.length} 行
-              </p>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            {/* エンジン切り替えタブ & 速度調整 */}
-            {!synthesizedAudioUrl && (
-              <>
-                <div className="flex items-center bg-slate-800/80 p-0.5 rounded-xl border border-slate-700 text-[10px] font-semibold">
-                  <button
-                    type="button"
-                    onClick={() => setEngineMode('voicevox')}
-                    className={`px-2 py-1 rounded-lg transition-all ${
-                      engineMode === 'voicevox'
-                        ? 'bg-emerald-600 text-white shadow-sm font-bold'
-                        : 'text-slate-400 hover:text-slate-200'
-                    }`}
-                    title="VOICEVOX: 日本語イントネーション完璧・自然な人間対話（青山龍星 & 四国めたん）"
-                  >
-                    🎌 VOICEVOX
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setEngineMode('google')}
-                    className={`px-2 py-1 rounded-lg transition-all ${
-                      engineMode === 'google'
-                        ? 'bg-indigo-600 text-white shadow-sm font-bold'
-                        : 'text-slate-400 hover:text-slate-200'
-                    }`}
-                    title="Google Neural2: アナウンサー級高音質（Gemini APIキー利用）"
-                  >
-                    ☁️ Google
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setEngineMode('kokoro')}
-                    className={`px-2 py-1 rounded-lg transition-all ${
-                      engineMode === 'kokoro'
-                        ? 'bg-amber-600 text-white shadow-sm font-bold'
-                        : 'text-slate-400 hover:text-slate-200'
-                    }`}
-                    title="Kokoro-82M: ローカルWebGPU完全無料（英語特化）"
-                  >
-                    ⚡ Kokoro
-                  </button>
-                </div>
-
-                {/* 会話速度セレクター */}
-                <div className="flex items-center space-x-1 bg-slate-800/80 px-2 py-1 rounded-xl border border-slate-700 text-[10px]">
-                  <span className="text-slate-400 font-medium">⚡速度:</span>
-                  <select
-                    value={speakingRate}
-                    onChange={(e) => setSpeakingRate(parseFloat(e.target.value))}
-                    className="bg-transparent text-slate-200 font-bold outline-none cursor-pointer"
-                  >
-                    <option value="0.85" className="bg-slate-900 text-slate-100">0.85x (ゆっくり)</option>
-                    <option value="1.0" className="bg-slate-900 text-slate-100">1.0x (標準)</option>
-                    <option value="1.05" className="bg-slate-900 text-slate-100">1.05x (自然)</option>
-                    <option value="1.15" className="bg-slate-900 text-slate-100">1.15x (軽快)</option>
-                    <option value="1.3" className="bg-slate-900 text-slate-100">1.3x (速め)</option>
-                  </select>
-                </div>
-              </>
-            )}
-
-            {!synthesizedAudioUrl ? (
+          {/* 音声エンジン & 速度設定ピル */}
+          <div className="flex items-center space-x-1.5 self-start sm:self-auto">
+            <div className="flex items-center bg-slate-950/90 rounded-lg border border-slate-800 p-0.5 text-[10px]">
+              <span className="text-slate-400 px-1.5 font-medium">エンジン:</span>
               <button
-                onClick={handleGenerateNeuralPodcast}
-                disabled={isSynthesizing || parsedLines.length === 0}
-                className="py-1.5 px-3 rounded-xl bg-gradient-to-r from-amber-500 to-indigo-600 hover:from-amber-400 hover:to-indigo-500 text-white shadow-md shadow-indigo-600/30 transition-all text-xs font-bold flex items-center space-x-1.5 active:scale-95 disabled:opacity-50"
-                title="選択したAI音声合成エンジンでポッドキャスト音声を一括生成"
+                type="button"
+                onClick={() => setEngineMode('voicevox')}
+                className={`px-2 py-0.5 rounded-md transition-all font-bold ${
+                  engineMode === 'voicevox'
+                    ? 'bg-emerald-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
               >
-                {isSynthesizing ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin text-white" />
-                    <span className="text-[11px]">{synthesisProgress}%</span>
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="w-3.5 h-3.5 text-amber-200 fill-amber-200" />
-                    <span className="text-[11px]">✨ 超高音質AI音声を生成</span>
-                  </>
-                )}
+                🎌 VOICEVOX
               </button>
-            ) : (
-              <a
-                href={synthesizedAudioUrl}
-                download={`Podcast_${Date.now()}.wav`}
-                className="py-1.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white transition-all text-xs font-bold flex items-center space-x-1.5 shadow-md shadow-emerald-600/30"
-                title="生成されたポッドキャスト音声をWAVとしてダウンロード"
+              <button
+                type="button"
+                onClick={() => setEngineMode('google')}
+                className={`px-2 py-0.5 rounded-md transition-all font-bold ${
+                  engineMode === 'google'
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
               >
-                <Download className="w-3.5 h-3.5" />
-                <span className="text-[11px]">音声保存 (.WAV)</span>
-              </a>
-            )}
+                ☁️ Google
+              </button>
+              <button
+                type="button"
+                onClick={() => setEngineMode('kokoro')}
+                className={`px-2 py-0.5 rounded-md transition-all font-bold ${
+                  engineMode === 'kokoro'
+                    ? 'bg-amber-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                ⚡ Kokoro
+              </button>
+            </div>
 
-            <button
-              onClick={handleReset}
-              className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition-colors"
-              title="最初から"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={handleTogglePlay}
-              disabled={isSynthesizing}
-              className="p-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white transition-all shadow-md shadow-indigo-600/30 active:scale-95 disabled:opacity-50 flex items-center space-x-1 font-bold text-xs"
-              title={synthesizedAudioUrl ? (isPlaying ? '一時停止' : '再生') : '✨ 自然なAI音声で生成＆再生'}
-            >
-              {isPlaying ? (
-                <>
-                  <Pause className="w-4 h-4" />
-                  <span>一時停止</span>
-                </>
-              ) : (
-                <>
-                  <Play className="w-4 h-4 fill-white ml-0.5" />
-                  <span>{synthesizedAudioUrl ? '再生' : 'AI音声で再生'}</span>
-                </>
-              )}
-            </button>
+            <div className="flex items-center bg-slate-950/90 rounded-lg border border-slate-800 px-2 py-1 text-[10px]">
+              <span className="text-slate-400 mr-1 font-medium">速度:</span>
+              <select
+                value={speakingRate}
+                onChange={(e) => setSpeakingRate(parseFloat(e.target.value))}
+                className="bg-transparent text-slate-200 font-bold outline-none cursor-pointer"
+              >
+                <option value="0.85" className="bg-slate-900 text-slate-100">0.85x</option>
+                <option value="1.0" className="bg-slate-900 text-slate-100">1.0x</option>
+                <option value="1.05" className="bg-slate-900 text-slate-100">1.05x (標準)</option>
+                <option value="1.15" className="bg-slate-900 text-slate-100">1.15x</option>
+                <option value="1.3" className="bg-slate-900 text-slate-100">1.3x</option>
+              </select>
+            </div>
           </div>
         </div>
 
+        {/* 中段: メインオーディオコントロール（中央揃え・明快な役割分担） */}
+        <div className="flex items-center justify-between sm:justify-center sm:space-x-6 py-1">
+          {/* 巻き戻し・最初から */}
+          <button
+            onClick={handleReset}
+            className="flex items-center space-x-1 px-3 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white transition-all text-xs font-medium border border-slate-700/60"
+            title="最初から再生"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">最初から</span>
+          </button>
+
+          {/* メイン主役ボタン: 再生 / 一時停止 / AI音声生成 */}
+          <button
+            onClick={handleTogglePlay}
+            disabled={isSynthesizing}
+            className={`px-6 py-2.5 rounded-xl font-bold text-xs flex items-center space-x-2 transition-all shadow-lg active:scale-95 disabled:opacity-50 ${
+              synthesizedAudioUrl
+                ? 'bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white shadow-indigo-600/30 ring-1 ring-white/10'
+                : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-emerald-600/30'
+            }`}
+          >
+            {isSynthesizing ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>AI音声合成中 ({synthesisProgress}%)</span>
+              </>
+            ) : isPlaying ? (
+              <>
+                <Pause className="w-4 h-4" />
+                <span>一時停止</span>
+              </>
+            ) : (
+              <>
+                <Play className="w-4 h-4 fill-white" />
+                <span>{synthesizedAudioUrl ? '再生する' : '✨ 自然なAI音声で再生'}</span>
+              </>
+            )}
+          </button>
+
+          {/* 右サイド: 保存ボタン または 生成ボタン */}
+          {synthesizedAudioUrl ? (
+            <a
+              href={synthesizedAudioUrl}
+              download={`Podcast_${Date.now()}.wav`}
+              className="flex items-center space-x-1 px-3 py-2 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 hover:text-emerald-200 transition-all text-xs font-bold border border-emerald-500/40"
+              title="生成したWAV音声を保存"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>WAV保存</span>
+            </a>
+          ) : (
+            <button
+              onClick={handleGenerateNeuralPodcast}
+              disabled={isSynthesizing}
+              className="flex items-center space-x-1 px-3 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-indigo-300 hover:text-indigo-200 transition-all text-xs font-medium border border-slate-700/60 disabled:opacity-50"
+              title="事前に音声を生成して保存可能にします"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+              <span className="hidden sm:inline">事前生成</span>
+            </button>
+          )}
+        </div>
+
+        {/* 下段: 進捗状況 & オーディオプレイヤー */}
         {isSynthesizing && synthesisStatus && (
           <div className="bg-indigo-950/60 border border-indigo-500/40 rounded-xl p-2.5 flex items-center space-x-2 text-xs text-indigo-200 animate-pulse">
             <Loader2 className="w-4 h-4 animate-spin text-indigo-400 shrink-0" />
@@ -475,13 +474,17 @@ export const PodcastPlayer: React.FC<PodcastPlayerProps> = ({ script, config }) 
         )}
 
         {synthesizedAudioUrl && (
-          <audio
-            ref={audioRef}
-            src={synthesizedAudioUrl}
-            onEnded={() => setIsPlaying(false)}
-            controls
-            className="w-full h-8 mt-2"
-          />
+          <div className="pt-2 border-t border-slate-800/60">
+            <audio
+              ref={audioRef}
+              src={synthesizedAudioUrl}
+              onPlay={() => setIsPlaying(true)}
+              onPause={() => setIsPlaying(false)}
+              onEnded={() => setIsPlaying(false)}
+              controls
+              className="w-full h-8 outline-none"
+            />
+          </div>
         )}
       </div>
 
