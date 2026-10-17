@@ -638,25 +638,52 @@ ${timeHint}`;
     const webRes = await fetch(webApiUrl, { signal: abortSignal });
 
     if (!webRes.ok) {
+      if (webRes.status === 429) {
+        throw new Error('VOICEVOX Web APIの利用制限（レートリミット）に達しました。数秒待つか、右上の「☁️ Google」モードをお試しください。');
+      }
       throw new Error(`VOICEVOX Web API 接続エラー (${webRes.status})`);
     }
 
     const webData = await webRes.json();
     if (!webData.success && !webData.wavDownloadUrl && !webData.mp3DownloadUrl) {
-      throw new Error(webData.errorMessage || 'VOICEVOX音声の生成に失敗しました');
+      throw new Error(webData.errorMessage || 'VOICEVOX音声の生成リクエストに失敗しました');
     }
 
-    // 音声ファイルのダウンロード（最大15秒待機ポーリング）
+    // status.json を監視してサーバー側の音声生成完了を確実に待機（最大35秒）
+    const statusUrl = webData.audioStatusUrl;
     const audioDownloadUrl = webData.wavDownloadUrl || webData.mp3DownloadUrl;
+
+    if (statusUrl) {
+      for (let sRetry = 0; sRetry < 35; sRetry++) {
+        if (abortSignal?.aborted) break;
+        try {
+          const sRes = await fetch(statusUrl, { signal: abortSignal });
+          if (sRes.ok) {
+            const sJson = await sRes.json();
+            if (sJson.isAudioReady === true || sJson.status === 'done') {
+              break;
+            }
+            if (sJson.isAudioError === true) {
+              throw new Error('VOICEVOXサーバー側で音声生成エラーが発生しました');
+            }
+          }
+        } catch (e: any) {
+          if (e.message && e.message.includes('サーバー側で音声生成エラー')) throw e;
+        }
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
+
+    // 音声ファイルのダウンロード（最大20秒待機ポーリング）
     let audioBytes: Uint8Array | null = null;
 
-    for (let retry = 0; retry < 12; retry++) {
+    for (let retry = 0; retry < 15; retry++) {
       if (abortSignal?.aborted) break;
       try {
         const audioFetch = await fetch(audioDownloadUrl, { signal: abortSignal });
         if (audioFetch.ok) {
           const ab = await audioFetch.arrayBuffer();
-          if (ab.byteLength > 2000) {
+          if (ab.byteLength > 1000) {
             audioBytes = new Uint8Array(ab);
             break;
           }
@@ -666,7 +693,7 @@ ${timeHint}`;
     }
 
     if (!audioBytes) {
-      throw new Error('VOICEVOX音声のダウンロードが完了しませんでした。VOICEVOXアプリをローカル起動(http://127.0.0.1:50021)するか、Googleモードをお試しください。');
+      throw new Error('VOICEVOX音声のダウンロードがタイムアウトしました。長文の生成時は少し待つか「☁️ Google」モードをお試しください。');
     }
 
     return audioBytes;

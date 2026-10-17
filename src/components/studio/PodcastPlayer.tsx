@@ -260,6 +260,11 @@ export const PodcastPlayer: React.FC<PodcastPlayerProps> = ({ script, config }) 
           audioBuffers.push(new Float32Array(pauseSamples));
 
           setSynthesisProgress(5 + Math.round(((i + 1) / parsedLines.length) * 90));
+
+          // Web API のレート制限を避けるため、次の行の生成前に500ms待機
+          if (i + 1 < parsedLines.length) {
+            await new Promise(r => setTimeout(r, 500));
+          }
         }
       } else {
         // --- ☁️ Google Cloud Neural2 ---
