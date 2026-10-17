@@ -261,9 +261,9 @@ export const PodcastPlayer: React.FC<PodcastPlayerProps> = ({ script, config }) 
 
           setSynthesisProgress(5 + Math.round(((i + 1) / parsedLines.length) * 90));
 
-          // Web API のレート制限を避けるため、次の行の生成前に500ms待機
+          // Web API の共有レート制限を回避するため、各行の生成完了後に1200msのインターバルを設ける
           if (i + 1 < parsedLines.length) {
-            await new Promise(r => setTimeout(r, 500));
+            await new Promise(r => setTimeout(r, 1200));
           }
         }
       } else {

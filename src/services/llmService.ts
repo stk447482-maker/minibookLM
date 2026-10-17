@@ -635,18 +635,35 @@ ${timeHint}`;
 
     // 2. WEB版 VOICEVOX API (TTS Quest API) へフォールバック
     const webApiUrl = `https://api.tts.quest/v3/voicevox/synthesis?speaker=${speakerId}&text=${encodeURIComponent(text)}`;
-    const webRes = await fetch(webApiUrl, { signal: abortSignal });
+    let webData: any = null;
 
-    if (!webRes.ok) {
+    // 429 レート制限時の自動バックオフ・リトライ（最大4回自動待機）
+    for (let attempt = 0; attempt < 4; attempt++) {
+      if (abortSignal?.aborted) break;
+      const webRes = await fetch(webApiUrl, { signal: abortSignal });
+
       if (webRes.status === 429) {
-        throw new Error('VOICEVOX Web APIの利用制限（レートリミット）に達しました。数秒待つか、右上の「☁️ Google」モードをお試しください。');
+        let waitSec = 3;
+        try {
+          const errJson = await webRes.json();
+          if (errJson.retryAfter) {
+            waitSec = Math.max(2, Math.min(10, Number(errJson.retryAfter) + 1));
+          }
+        } catch {}
+        await new Promise(r => setTimeout(r, waitSec * 1000));
+        continue;
       }
-      throw new Error(`VOICEVOX Web API 接続エラー (${webRes.status})`);
+
+      if (!webRes.ok) {
+        throw new Error(`VOICEVOX Web API 接続エラー (${webRes.status})`);
+      }
+
+      webData = await webRes.json();
+      break;
     }
 
-    const webData = await webRes.json();
-    if (!webData.success && !webData.wavDownloadUrl && !webData.mp3DownloadUrl) {
-      throw new Error(webData.errorMessage || 'VOICEVOX音声の生成リクエストに失敗しました');
+    if (!webData || (!webData.success && !webData.wavDownloadUrl && !webData.mp3DownloadUrl)) {
+      throw new Error(webData?.errorMessage || 'VOICEVOX Web APIの利用制限（レートリミット）により混雑しています。数秒後に再試行するか「☁️ Google」モードをお試しください。');
     }
 
     // status.json を監視してサーバー側の音声生成完了を確実に待機（最大35秒）
