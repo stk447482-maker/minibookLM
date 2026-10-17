@@ -2,7 +2,7 @@
 // [Auditor] Antigravity 2.0 x takumiGuard
 // [Status] Pass (Harness env checked).
 
-export type ModelMode = 'embedded-mobile' | 'desktop-gguf' | 'desktop-api' | 'lmstudio' | 'cloud-gemini' | 'sarashina';
+export type ModelMode = 'embedded-mobile' | 'desktop-gguf' | 'desktop-api' | 'lmstudio' | 'cloud-gemini';
 
 export interface ModelTuningProfile {
   category: string;
@@ -22,9 +22,6 @@ export interface ModelConfig {
   desktopModelName?: string;
   desktopModelPath?: string;
   lmStudioEndpoint?: string;
-  sarashinaEndpoint?: string;
-  sarashinaApiKey?: string;
-  sarashinaModelName?: string;
   autoTuningEnabled?: boolean;
   tuningProfile?: ModelTuningProfile;
   cloudApiKey?: string;

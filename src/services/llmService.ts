@@ -102,85 +102,6 @@ class LLMService {
     }
   }
 
-  // 1.5 Sarashina API へのストリーミング (OpenAI互換)
-  private async *streamSarashina(
-    apiKey: string,
-    modelName: string,
-    messages: { role: 'system' | 'user' | 'assistant'; content: string }[],
-    temperature: number = 0.3,
-    endpoint: string = 'https://api.sarashina.ai/v1',
-    abortSignal?: AbortSignal
-  ): AsyncIterable<string> {
-    const targetModel = modelName?.trim() || 'sarashina3-mini';
-    let cleanEndpoint = endpoint.replace(/\/+$/, '');
-    if (!cleanEndpoint.endsWith('/chat/completions')) {
-      if (cleanEndpoint.endsWith('/v1')) {
-        cleanEndpoint = `${cleanEndpoint}/chat/completions`;
-      } else {
-        cleanEndpoint = `${cleanEndpoint}/v1/chat/completions`;
-      }
-    }
-
-    const res = await fetch(cleanEndpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: targetModel,
-        messages,
-        temperature,
-        stream: true
-      }),
-      signal: abortSignal
-    });
-
-    if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(`Sarashina APIエラー (${res.status}): ${errText}`);
-    }
-
-    const reader = res.body?.getReader();
-    if (!reader) throw new Error('ReadableStreamを利用できません');
-
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    while (true) {
-      if (abortSignal?.aborted) break;
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        if (abortSignal?.aborted) break;
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith(':')) continue;
-
-        if (trimmed === 'data: [DONE]') {
-          return;
-        }
-
-        if (trimmed.startsWith('data: ')) {
-          try {
-            const jsonStr = trimmed.slice(6);
-            const data = JSON.parse(jsonStr);
-            const content = data.choices?.[0]?.delta?.content;
-            if (content) {
-              yield content;
-            }
-          } catch {
-            // パースエラーは無視して継続
-          }
-        }
-      }
-    }
-  }
-
   // 2. デスクトップ API (Ollama / server.py) へのストリーミング
   private async *streamDesktopApi(
     endpoint: string,
@@ -447,22 +368,6 @@ class LLMService {
       }
       yield* this.streamGeminiDirect(config.cloudApiKey, config.desktopModelName || 'gemini-1.5-flash', messages, config.temperature, abortSignal);
       return;
-    }
-
-    // 🌸 国産 Sarashina API モード
-    if (config.mode === 'sarashina') {
-      if (!config.sarashinaApiKey) {
-        throw new Error('Sarashina APIキーが未入力です。「⚙️設定」からAPIキーを入力してください。');
-      }
-      const endpoint = config.sarashinaEndpoint || 'https://api.sarashina.ai/v1';
-      const model = config.sarashinaModelName || 'sarashina3-mini';
-      try {
-        yield* this.streamSarashina(config.sarashinaApiKey, model, messages, config.temperature, endpoint, abortSignal);
-        return;
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        throw new Error(`Sarashina API への接続に失敗しました: ${msg}`);
-      }
     }
 
     // 📱/💻 ブラウザ内 WebGPU (WebLLM) 推論モード（Python不要・完全ブラウザ完結）

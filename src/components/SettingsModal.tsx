@@ -387,35 +387,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               )}
             </div>
           </div>
-
-          {/* 🌸 国産 Sarashina API */}
-          <div
-            onClick={() => handleModeSelect('sarashina')}
-            className={`p-3.5 rounded-xl border cursor-pointer transition-all ${
-              config.mode === 'sarashina'
-                ? 'bg-pink-600/10 border-pink-500 shadow-md shadow-pink-500/10'
-                : 'bg-slate-800/40 border-slate-700/60 hover:border-slate-600'
-            }`}
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-3">
-                <div className="p-2 rounded-lg bg-pink-500/10 text-pink-400">
-                  <Sparkles className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="text-xs font-bold text-slate-200">🌸 国産 Sarashina API (SB Intuitions)</h3>
-                  <p className="text-[11px] text-slate-400">
-                    日本語特化型モデル（Sarashina3 mini / nano）。自然な日本語対話・高いトークン効率
-                  </p>
-                </div>
-              </div>
-              {config.mode === 'sarashina' && (
-                <div className="w-4 h-4 rounded-full bg-pink-500 flex items-center justify-center">
-                  <Check className="w-3 h-3 text-white" />
-                </div>
-              )}
-            </div>
-          </div>
         </div>
 
         {/* 💻 デスクトップ・詳細設定（フォルダー指定＆プルダウン＆自動微調整） */}
@@ -709,64 +680,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   ✓ 送信対象モデル: {config.desktopModelName}
                 </p>
               )}
-            </div>
-          </div>
-        )}
-
-        {/* 🌸 Sarashina API 詳細設定 */}
-        {config.mode === 'sarashina' && (
-          <div className="bg-slate-950/80 p-4 rounded-xl border border-pink-500/40 space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <Sparkles className="w-4 h-4 text-pink-400" />
-                <h4 className="text-xs font-bold text-slate-200">Sarashina API 接続設定 (SB Intuitions)</h4>
-              </div>
-              <span className="text-[10px] bg-pink-500/10 text-pink-300 border border-pink-500/30 px-2 py-0.5 rounded font-mono">
-                OpenAI互換 (v1)
-              </span>
-            </div>
-
-            <div>
-              <label className="text-[10px] text-slate-400 block mb-1">
-                Sarashina API エンドポイント
-              </label>
-              <input
-                type="text"
-                value={config.sarashinaEndpoint || 'https://api.sarashina.ai/v1'}
-                onChange={(e) => onChangeConfig({ ...config, sarashinaEndpoint: e.target.value })}
-                placeholder="https://api.sarashina.ai/v1"
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-pink-500 font-mono"
-              />
-            </div>
-
-            <div>
-              <label className="text-[10px] text-slate-400 block mb-1">
-                Sarashina APIキー
-              </label>
-              <input
-                type="password"
-                value={config.sarashinaApiKey || ''}
-                onChange={(e) => onChangeConfig({ ...config, sarashinaApiKey: e.target.value })}
-                placeholder="sk-... (Sarashina ポータルで発行したAPIキー)"
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-pink-500 font-mono"
-              />
-            </div>
-
-            <div>
-              <label className="text-[10px] text-slate-400 block mb-1">
-                使用モデル名
-              </label>
-              <select
-                value={config.sarashinaModelName || 'sarashina3-mini'}
-                onChange={(e) => onChangeConfig({ ...config, sarashinaModelName: e.target.value })}
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-pink-500 font-mono"
-              >
-                <option value="sarashina3-mini">🌸 sarashina3-mini (対話・要約・汎用・推奨)</option>
-                <option value="sarashina3-nano">⚡ sarashina3-nano (超高速・低レイテンシ)</option>
-              </select>
-              <p className="text-[10px] text-pink-300/80 mt-1.5 leading-relaxed">
-                ※ 日本語データに特化した高精度推論を実行します。無料ベータ版ご利用時は機密データの送信にご留意ください。
-              </p>
             </div>
           </div>
         )}
