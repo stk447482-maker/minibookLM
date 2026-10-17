@@ -29,6 +29,8 @@ export interface ModelConfig {
   audioTranscriptionEngine?: 'auto' | 'gemini' | 'whisper-small' | 'whisper-large-v3' | 'kotoba-whisper' | 'native-large-v3' | 'native-kotoba' | 'whisper-local';
   enableAudioContextRefiner?: boolean;
   whisperServerEndpoint?: string;
+  podcastTtsEngine?: 'voicevox' | 'google' | 'kokoro' | 'webspeech';
+  podcastSpeakingRate?: number;
 }
 
 

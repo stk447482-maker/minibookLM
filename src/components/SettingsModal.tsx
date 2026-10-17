@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Smartphone, Laptop, Sparkles, Check, Cloud, Key, Folder, RefreshCw, Zap, Download, Database, Cpu } from 'lucide-react';
+import { X, Smartphone, Laptop, Sparkles, Check, Cloud, Key, Folder, RefreshCw, Zap, Download, Database, Cpu, Volume2 } from 'lucide-react';
 import { ModelConfig, ModelMode, ModelTuningProfile } from '../types/index.ts';
 
 
@@ -847,6 +847,78 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 英語や多言語音声向け・低スペック端末用極小モデル
               </div>
             </button>
+          </div>
+
+          {/* 📻 ポッドキャストAI音声エンジン設定 */}
+          <div className="pt-3 border-t border-slate-800/80 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-1.5 text-xs font-bold text-indigo-400">
+                <Volume2 className="w-4 h-4 text-indigo-400" />
+                <span>📻 ポッドキャストAI音声合成エンジン</span>
+              </div>
+              <span className="text-[10px] font-mono text-slate-400 bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
+                2話者自然対話
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-400">
+              ポッドキャスト生成時に使用する音声音質を選択します。「ロボット音声」ではなく人間のような自然な肉声で対話再生できます。
+            </p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => onChangeConfig({ ...config, podcastTtsEngine: 'voicevox' })}
+                className={`p-2.5 rounded-lg border text-left transition-all ${
+                  (config.podcastTtsEngine === 'voicevox' || !config.podcastTtsEngine)
+                    ? 'bg-emerald-950/40 border-emerald-500/80 text-emerald-200 shadow-sm shadow-emerald-500/20'
+                    : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:border-slate-700'
+                }`}
+              >
+                <div className="text-xs font-bold text-slate-200 flex items-center justify-between">
+                  <span>🎌 VOICEVOX</span>
+                  {(config.podcastTtsEngine === 'voicevox' || !config.podcastTtsEngine) && <Check className="w-3.5 h-3.5 text-emerald-400" />}
+                </div>
+                <div className="text-[10px] text-slate-400 mt-1">
+                  【推奨・完全無料】青山龍星 ＆ 四国めたん。完璧な日本語イントネーション
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onChangeConfig({ ...config, podcastTtsEngine: 'google' })}
+                className={`p-2.5 rounded-lg border text-left transition-all ${
+                  config.podcastTtsEngine === 'google'
+                    ? 'bg-indigo-950/40 border-indigo-500/80 text-indigo-200 shadow-sm shadow-indigo-500/20'
+                    : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:border-slate-700'
+                }`}
+              >
+                <div className="text-xs font-bold text-slate-200 flex items-center justify-between">
+                  <span>☁️ Google Neural2</span>
+                  {config.podcastTtsEngine === 'google' && <Check className="w-3.5 h-3.5 text-indigo-400" />}
+                </div>
+                <div className="text-[10px] text-slate-400 mt-1">
+                  アナウンサー級の超高音質（Gemini/Google APIキーで毎月無料枠利用可）
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onChangeConfig({ ...config, podcastTtsEngine: 'kokoro' })}
+                className={`p-2.5 rounded-lg border text-left transition-all ${
+                  config.podcastTtsEngine === 'kokoro'
+                    ? 'bg-amber-950/40 border-amber-500/80 text-amber-200 shadow-sm shadow-amber-500/20'
+                    : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:border-slate-700'
+                }`}
+              >
+                <div className="text-xs font-bold text-slate-200 flex items-center justify-between">
+                  <span>⚡ Kokoro-82M</span>
+                  {config.podcastTtsEngine === 'kokoro' && <Check className="w-3.5 h-3.5 text-amber-400" />}
+                </div>
+                <div className="text-[10px] text-slate-400 mt-1">
+                  ブラウザWebGPU直接実行（英語特化・端末内完結）
+                </div>
+              </button>
+            </div>
           </div>
 
           {/* 🪄 Rock-ON式 文脈復元・校正 (Context Refiner) オプション */}

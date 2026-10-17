@@ -92,6 +92,19 @@ export const PodcastPlayer: React.FC<PodcastPlayerProps> = ({ script, config }) 
     window.speechSynthesis.speak(utterance);
   };
 
+  const [engineMode, setEngineMode] = useState<'google' | 'voicevox' | 'kokoro'>(
+    config?.podcastTtsEngine === 'google' || config?.podcastTtsEngine === 'kokoro' 
+      ? config.podcastTtsEngine 
+      : 'voicevox'
+  );
+  const [speakingRate, setSpeakingRate] = useState<number>(config?.podcastSpeakingRate || 1.05);
+
+  useEffect(() => {
+    if (config?.podcastTtsEngine && config.podcastTtsEngine !== 'webspeech') {
+      setEngineMode(config.podcastTtsEngine as any);
+    }
+  }, [config?.podcastTtsEngine]);
+
   const handleTogglePlay = () => {
     if (synthesizedAudioUrl && audioRef.current) {
       if (isPlaying) {
@@ -104,17 +117,12 @@ export const PodcastPlayer: React.FC<PodcastPlayerProps> = ({ script, config }) 
       return;
     }
 
-    if (isPlaying) {
-      window.speechSynthesis.cancel();
-      setIsPlaying(false);
-    } else {
-      setIsPlaying(true);
-      playLineWebSpeech(currentLineIndex);
+    // まだ高音質AI音声が生成されていない場合、自動的にニューラル音声生成をトリガー
+    if (!isSynthesizing) {
+      handleGenerateNeuralPodcast();
     }
   };
 
-  const [engineMode, setEngineMode] = useState<'google' | 'voicevox' | 'kokoro'>('google');
-  const [speakingRate, setSpeakingRate] = useState<number>(1.05);
   const ttsWorkerRef = useRef<Worker | null>(null);
 
   const handleReset = () => {
@@ -321,9 +329,9 @@ export const PodcastPlayer: React.FC<PodcastPlayerProps> = ({ script, config }) 
     <div className="space-y-4">
       {/* プレーヤーコントロール */}
       <div className="bg-gradient-to-r from-indigo-950/80 via-slate-900 to-violet-950/80 border border-indigo-500/30 rounded-2xl p-4 shadow-xl space-y-3">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
           <div className="flex items-center space-x-3">
-            <div className="w-12 h-12 rounded-xl bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center text-indigo-400">
+            <div className="w-12 h-12 rounded-xl bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center text-indigo-400 shrink-0">
               <Mic className="w-6 h-6" />
             </div>
             <div>
@@ -339,20 +347,20 @@ export const PodcastPlayer: React.FC<PodcastPlayerProps> = ({ script, config }) 
             </div>
           </div>
 
-          <div className="flex items-center space-x-2">
+          <div className="flex flex-wrap items-center gap-2">
             {/* エンジン切り替えタブ & 速度調整 */}
             {!synthesizedAudioUrl && (
-              <div className="flex items-center space-x-2">
+              <>
                 <div className="flex items-center bg-slate-800/80 p-0.5 rounded-xl border border-slate-700 text-[10px] font-semibold">
                   <button
                     type="button"
                     onClick={() => setEngineMode('voicevox')}
                     className={`px-2 py-1 rounded-lg transition-all ${
                       engineMode === 'voicevox'
-                        ? 'bg-emerald-600 text-white shadow-sm'
+                        ? 'bg-emerald-600 text-white shadow-sm font-bold'
                         : 'text-slate-400 hover:text-slate-200'
                     }`}
-                    title="VOICEVOX (案B): 日本語イントネーション完璧・自然な人間対話（青山龍星 & 四国めたん）"
+                    title="VOICEVOX: 日本語イントネーション完璧・自然な人間対話（青山龍星 & 四国めたん）"
                   >
                     🎌 VOICEVOX
                   </button>
@@ -361,10 +369,10 @@ export const PodcastPlayer: React.FC<PodcastPlayerProps> = ({ script, config }) 
                     onClick={() => setEngineMode('google')}
                     className={`px-2 py-1 rounded-lg transition-all ${
                       engineMode === 'google'
-                        ? 'bg-indigo-600 text-white shadow-sm'
+                        ? 'bg-indigo-600 text-white shadow-sm font-bold'
                         : 'text-slate-400 hover:text-slate-200'
                     }`}
-                    title="Google Neural2: 高品質・Gemini API連携"
+                    title="Google Neural2: アナウンサー級高音質（Gemini APIキー利用）"
                   >
                     ☁️ Google
                   </button>
@@ -373,10 +381,10 @@ export const PodcastPlayer: React.FC<PodcastPlayerProps> = ({ script, config }) 
                     onClick={() => setEngineMode('kokoro')}
                     className={`px-2 py-1 rounded-lg transition-all ${
                       engineMode === 'kokoro'
-                        ? 'bg-amber-600 text-white shadow-sm'
+                        ? 'bg-amber-600 text-white shadow-sm font-bold'
                         : 'text-slate-400 hover:text-slate-200'
                     }`}
-                    title="Kokoro-82M: ローカルWebGPU完全無料"
+                    title="Kokoro-82M: ローカルWebGPU完全無料（英語特化）"
                   >
                     ⚡ Kokoro
                   </button>
@@ -392,20 +400,20 @@ export const PodcastPlayer: React.FC<PodcastPlayerProps> = ({ script, config }) 
                   >
                     <option value="0.85" className="bg-slate-900 text-slate-100">0.85x (ゆっくり)</option>
                     <option value="1.0" className="bg-slate-900 text-slate-100">1.0x (標準)</option>
-                    <option value="1.1" className="bg-slate-900 text-slate-100">1.1x (軽快)</option>
-                    <option value="1.2" className="bg-slate-900 text-slate-100">1.2x (速め)</option>
-                    <option value="1.35" className="bg-slate-900 text-slate-100">1.35x (倍速)</option>
+                    <option value="1.05" className="bg-slate-900 text-slate-100">1.05x (自然)</option>
+                    <option value="1.15" className="bg-slate-900 text-slate-100">1.15x (軽快)</option>
+                    <option value="1.3" className="bg-slate-900 text-slate-100">1.3x (速め)</option>
                   </select>
                 </div>
-              </div>
+              </>
             )}
 
             {!synthesizedAudioUrl ? (
               <button
                 onClick={handleGenerateNeuralPodcast}
                 disabled={isSynthesizing || parsedLines.length === 0}
-                className="py-2 px-3 rounded-xl bg-gradient-to-r from-amber-500 to-indigo-600 hover:from-amber-400 hover:to-indigo-500 text-white shadow-lg shadow-indigo-600/30 transition-all text-xs font-bold flex items-center space-x-1.5 active:scale-95 disabled:opacity-50"
-                title="Google Neural2最高音質でポッドキャスト音声を一括生成"
+                className="py-1.5 px-3 rounded-xl bg-gradient-to-r from-amber-500 to-indigo-600 hover:from-amber-400 hover:to-indigo-500 text-white shadow-md shadow-indigo-600/30 transition-all text-xs font-bold flex items-center space-x-1.5 active:scale-95 disabled:opacity-50"
+                title="選択したAI音声合成エンジンでポッドキャスト音声を一括生成"
               >
                 {isSynthesizing ? (
                   <>
@@ -414,7 +422,7 @@ export const PodcastPlayer: React.FC<PodcastPlayerProps> = ({ script, config }) 
                   </>
                 ) : (
                   <>
-                    <Sparkles className="w-4 h-4 text-amber-200 fill-amber-200" />
+                    <Sparkles className="w-3.5 h-3.5 text-amber-200 fill-amber-200" />
                     <span className="text-[11px]">✨ 超高音質AI音声を生成</span>
                   </>
                 )}
@@ -423,26 +431,38 @@ export const PodcastPlayer: React.FC<PodcastPlayerProps> = ({ script, config }) 
               <a
                 href={synthesizedAudioUrl}
                 download={`Podcast_${Date.now()}.wav`}
-                className="py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white transition-all text-xs font-bold flex items-center space-x-1.5 shadow-md shadow-emerald-600/30"
+                className="py-1.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white transition-all text-xs font-bold flex items-center space-x-1.5 shadow-md shadow-emerald-600/30"
                 title="生成されたポッドキャスト音声をWAVとしてダウンロード"
               >
-                <Download className="w-4 h-4" />
+                <Download className="w-3.5 h-3.5" />
                 <span className="text-[11px]">音声保存 (.WAV)</span>
               </a>
             )}
 
             <button
               onClick={handleReset}
-              className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition-colors"
+              className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition-colors"
               title="最初から"
             >
-              <RotateCcw className="w-4 h-4" />
+              <RotateCcw className="w-3.5 h-3.5" />
             </button>
             <button
               onClick={handleTogglePlay}
-              className="p-3 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white transition-all shadow-md shadow-indigo-600/30 active:scale-95"
+              disabled={isSynthesizing}
+              className="p-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white transition-all shadow-md shadow-indigo-600/30 active:scale-95 disabled:opacity-50 flex items-center space-x-1 font-bold text-xs"
+              title={synthesizedAudioUrl ? (isPlaying ? '一時停止' : '再生') : '✨ 自然なAI音声で生成＆再生'}
             >
-              {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5 ml-0.5" />}
+              {isPlaying ? (
+                <>
+                  <Pause className="w-4 h-4" />
+                  <span>一時停止</span>
+                </>
+              ) : (
+                <>
+                  <Play className="w-4 h-4 fill-white ml-0.5" />
+                  <span>{synthesizedAudioUrl ? '再生' : 'AI音声で再生'}</span>
+                </>
+              )}
             </button>
           </div>
         </div>
