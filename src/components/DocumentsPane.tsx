@@ -20,6 +20,7 @@ import {
   Plus
 } from 'lucide-react';
 import { DocumentSource, Project } from '../types/index.ts';
+import { YoutubeAudioService } from '../services/youtubeAudioService.ts';
 
 interface DocumentsPaneProps {
   projects: Project[];
@@ -88,6 +89,7 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
   const [showUrlModal, setShowUrlModal] = useState(false);
   const [urlInput, setUrlInput] = useState('');
   const [isFetchingUrl, setIsFetchingUrl] = useState(false);
+  const [urlFetchStatus, setUrlFetchStatus] = useState<string>('');
   const [urlFetchError, setUrlFetchError] = useState<string | null>(null);
 
   const enabledCount = documents.filter(d => d.enabled).length;
@@ -241,21 +243,38 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
           }
         }
 
-        // 🚨 捏造（ハルシネーション）の完全防止:
-        // 字幕や実際のテキストデータが取得できない場合に、LLMに適当な推測を行わせることは絶対に禁止
+        // 🎯 方式 3: 字幕トラックがない場合、音声を自動抽出して内蔵Whisperで文字起こし
         if (!transcriptText || transcriptText.length < 50) {
-          throw new Error(
-            `YouTube動画「${videoTitle}」から公式の字幕データ（日本語・英語）を検出・取得できませんでした。\n\n` +
-            `【原因と確実な対策】\n` +
-            `• この動画は投稿者によって字幕が無効化されているか、自動字幕の生成が完了していません。\n` +
-            `• 【確実な方法】動画の音声（mp3/m4a/wav）をPCに保存し、左側のエリアにドラッグ＆ドロップしてください。内蔵のWhisperが発話音声を100%正確に文字起こしします。`
-          );
+          try {
+            setUrlFetchStatus('📺 字幕なし動画を検出。音声ストリームを自動抽出中...');
+            const audioResult = await YoutubeAudioService.fetchAudioBlob(videoId, (status) => {
+              setUrlFetchStatus(status);
+            });
+
+            // 音声Fileオブジェクトを生成し、アップロードパイプライン（Whisper）に引き渡し
+            const dt = new DataTransfer();
+            dt.items.add(audioResult.file);
+            onUpload(dt.files);
+
+            setUrlInput('');
+            setShowUrlModal(false);
+            setUrlFetchStatus('');
+            return;
+          } catch (audioErr: any) {
+            console.warn('YouTube audio extraction failed:', audioErr);
+            throw new Error(
+              `YouTube動画「${videoTitle}」から字幕・音声を自動取得できませんでした。\n\n` +
+              `【理由】動画配信サーバーからの音声ストリーム抽出に失敗しました。\n` +
+              `【確実な対策】動画の音声（mp3/m4a/wav）をPCに保存し、左側のエリアにドラッグ＆ドロップしてください。内蔵のWhisperが発話音声を100%正確に文字起こしします。`
+            );
+          }
         }
 
         const formattedDoc = `## 📺 YouTube動画 文字起こしデータ\n- **タイトル:** ${videoTitle}\n- **URL:** ${rawUrl}\n- **取得時刻:** ${new Date().toLocaleString('ja-JP')}\n\n---\n\n${transcriptText}`;
         await onAddTextContent(`📺 ${videoTitle.slice(0, 35)}`, formattedDoc);
         setUrlInput('');
         setShowUrlModal(false);
+        setUrlFetchStatus('');
         return;
       }
 
@@ -885,7 +904,7 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
                   {isFetchingUrl ? (
                     <>
                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      <span>解析＆取り込み中...</span>
+                      <span>{urlFetchStatus || '解析＆取り込み中...'}</span>
                     </>
                   ) : (
                     <>
