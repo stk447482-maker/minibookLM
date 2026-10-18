@@ -40,6 +40,10 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const isHandsFreeRef = useRef(false);
   isHandsFreeRef.current = isHandsFree;
 
+  // ブラウザの音声認識対応状況チェック (Chrome, Edge等で有効、Firefox等では非対応)
+  const isSpeechSupported = typeof window !== 'undefined' && 
+    (Boolean((window as any).SpeechRecognition) || Boolean((window as any).webkitSpeechRecognition));
+
   // 音声読み上げ (TTS: SpeechSynthesis)
   const handleSpeak = (msgId: string, text: string, onFinish?: () => void) => {
     if (!('speechSynthesis' in window)) return;
@@ -408,48 +412,67 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           <button
             type="button"
             onClick={toggleHandsFree}
-            disabled={isGenerating}
+            disabled={isGenerating || !isSpeechSupported}
             className={`p-3 rounded-xl border transition-all shrink-0 flex items-center justify-center space-x-1 ${
-              isHandsFree
+              !isSpeechSupported
+                ? 'opacity-40 cursor-not-allowed bg-slate-800 border-slate-700 text-slate-500'
+                : isHandsFree
                 ? 'bg-purple-600 text-white border-purple-400 animate-pulse shadow-lg shadow-purple-600/30'
                 : 'bg-slate-800 hover:bg-slate-750 text-slate-400 hover:text-purple-300 border-slate-700'
             }`}
-            title={isHandsFree ? "ハンズフリー通話モードを停止" : "🎧 ハンズフリー通話モードを開始（声で話す ➔ AI回答 ➔ 自動音声再生 ➔ 自動で次の待ち受けへ）"}
+            title={
+              !isSpeechSupported
+                ? 'お使いのブラウザは音声認識非対応です（Chrome / Edge をご利用ください）'
+                : isHandsFree
+                ? 'ハンズフリー通話モードを停止'
+                : '🎧 ハンズフリー通話モードを開始（声で話す ➔ AI回答 ➔ 自動音声再生 ➔ 自動で次の待ち受けへ）'
+            }
           >
             <Headphones className="w-4 h-4" />
-            <span className="text-[10px] font-bold hidden md:inline">{isHandsFree ? '通話中' : '通話'}</span>
+            <span className="text-[10px] font-bold hidden md:inline">
+              {!isSpeechSupported ? '非対応' : isHandsFree ? '通話中' : '通話'}
+            </span>
           </button>
 
           <button
             type="button"
             onClick={toggleListening}
-            disabled={isGenerating}
+            disabled={isGenerating || !isSpeechSupported}
             className={`p-3 rounded-xl border transition-all shrink-0 flex items-center justify-center ${
-              isListening
+              !isSpeechSupported
+                ? 'opacity-40 cursor-not-allowed bg-slate-800 border-slate-700 text-slate-500'
+                : isListening
                 ? 'bg-rose-600 text-white border-rose-500 animate-pulse shadow-lg shadow-rose-600/30'
                 : 'bg-slate-800 hover:bg-slate-750 text-slate-400 hover:text-slate-200 border-slate-700'
             }`}
-            title={isListening ? "音声入力を終了" : "音声で話しかける (単発音声入力)"}
+            title={
+              !isSpeechSupported
+                ? 'お使いのブラウザは音声認識非対応です（Chrome / Edge 推奨）'
+                : isListening
+                ? '音声入力を終了'
+                : '音声で話しかける (単発音声入力)'
+            }
           >
             {isListening ? <MicOff className="w-4 h-4 text-white" /> : <Mic className="w-4 h-4" />}
           </button>
 
+          {/* 🎯 原文ファクト抽出（旧・厳密RAG抽出）: LLM生成を通さず資料から該当事実・数値を0秒抽出 */}
           <button
             type="button"
             onClick={(e) => handleSubmit(e, true)}
             disabled={!input.trim() || isGenerating}
-            className="px-3.5 py-3 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-emerald-400 hover:text-emerald-300 border border-slate-700 rounded-xl text-xs font-bold transition-all shrink-0 flex items-center space-x-1"
-            title="LLM推論を介さず、ドキュメントから該当箇所を直接抽出して返答します"
+            className="px-3.5 py-3 bg-slate-800 hover:bg-emerald-950/40 hover:border-emerald-500/60 disabled:opacity-40 text-emerald-400 hover:text-emerald-300 border border-slate-700 rounded-xl text-xs font-bold transition-all shrink-0 flex items-center space-x-1 shadow-sm"
+            title="【ハルシネーション完全ゼロ・0秒即答】\nLLMの文章要約を通さず、選択した資料から直接該当する数値・条項・事実を抽出してシート出力します。"
           >
             <Zap className="w-4 h-4 text-emerald-400" />
-            <span className="hidden sm:inline">厳密RAG抽出</span>
+            <span className="hidden sm:inline">原文ファクト抽出</span>
           </button>
 
           <button
             type="submit"
             disabled={!input.trim() || isGenerating}
             className="p-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white disabled:text-slate-500 rounded-xl transition-all shadow-md shadow-indigo-600/20 disabled:shadow-none shrink-0"
-            title="AI回答を生成"
+            title="AI回答を生成 (自然な対話・要約)"
           >
             <Send className="w-4 h-4" />
           </button>

@@ -193,6 +193,15 @@ export async function decodeAudioTo16kMono(file: File): Promise<{
   audioData: Float32Array;
   durationSec: number;
 }> {
+  // ブラウザのメモリ枯渇（OOMクラッシュ）防止ガード（150MB超の動画・音声は警告して防止）
+  const MAX_SAFE_FILE_SIZE_BYTES = 150 * 1024 * 1024;
+  if (file.size > MAX_SAFE_FILE_SIZE_BYTES) {
+    const sizeMb = (file.size / (1024 * 1024)).toFixed(1);
+    throw new Error(
+      `ファイルサイズ(${sizeMb}MB)がブラウザの安全制限(150MB)を超えています。ブラウザクラッシュを回避するため、事前に音声を圧縮するか分割して投入してください。`
+    );
+  }
+
   const arrayBuffer = await file.arrayBuffer();
 
   const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();

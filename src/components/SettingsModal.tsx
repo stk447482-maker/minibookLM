@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { X, Smartphone, Laptop, Sparkles, Check, Cloud, Key, Folder, RefreshCw, Zap, Download, Database, Cpu, Volume2 } from 'lucide-react';
+import { X, Smartphone, Laptop, Sparkles, Check, Cloud, Key, Folder, RefreshCw, Zap, Download, Database, Cpu, Volume2, HardDrive, Trash2 } from 'lucide-react';
 import { ModelConfig, ModelMode, ModelTuningProfile } from '../types/index.ts';
-
-
-
+import { dbService } from '../services/db.ts';
 import { llmService } from '../services/llmService.ts';
 
 interface SettingsModalProps {
@@ -32,6 +30,48 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [isScanning, setIsScanning] = useState<boolean>(false);
   const [scanError, setScanError] = useState<string | null>(null);
 
+  // 📊 IndexedDB / ブラウザストレージ使用量モニター
+  const [storageUsage, setStorageUsage] = useState<{ usedMb: string; quotaMb: string; percent: string } | null>(null);
+  const [isClearingCache, setIsClearingCache] = useState(false);
+  const [clearCacheSuccess, setClearCacheSuccess] = useState(false);
+
+  const refreshStorageUsage = async () => {
+    try {
+      const { usedBytes, quotaBytes, percent } = await dbService.getStorageUsage();
+      const usedMb = (usedBytes / (1024 * 1024)).toFixed(1);
+      const quotaMb = (quotaBytes / (1024 * 1024)).toFixed(0);
+      setStorageUsage({
+        usedMb,
+        quotaMb,
+        percent: percent.toFixed(1)
+      });
+    } catch {
+      // ignore
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      refreshStorageUsage();
+    }
+  }, [isOpen]);
+
+  const handleClearCache = async () => {
+    if (!window.confirm('過去のチャット履歴とStudio生成物キャッシュを削除してブラウザ空き容量を確保しますか？（※登録したドキュメント・ソースファイルは削除されません）')) {
+      return;
+    }
+    setIsClearingCache(true);
+    try {
+      await dbService.clearCacheData();
+      setClearCacheSuccess(true);
+      await refreshStorageUsage();
+      setTimeout(() => setClearCacheSuccess(false), 3000);
+    } catch (e: any) {
+      alert(`キャッシュ削除に失敗しました: ${e?.message}`);
+    } finally {
+      setIsClearingCache(false);
+    }
+  };
 
   // LM Studio 接続状態＆検出モデル一覧
   const [lmStudioModels, setLmStudioModels] = useState<string[]>([]);
@@ -986,6 +1026,40 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </span>
             </div>
           )}
+
+          {/* 📊 ブラウザストレージ使用量 ＆ キャッシュクリーンアップ */}
+          <div className="pt-2 border-t border-slate-800/80">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center space-x-1.5 text-xs font-bold text-slate-200">
+                <HardDrive className="w-3.5 h-3.5 text-cyan-400" />
+                <span>📊 ローカル保存領域 (IndexedDB 使用状況)</span>
+              </div>
+              {storageUsage && (
+                <span className="text-[11px] font-mono text-cyan-400 bg-cyan-950/40 border border-cyan-500/30 px-2 py-0.5 rounded">
+                  使用中: {storageUsage.usedMb} MB / 上限: {storageUsage.quotaMb} MB ({storageUsage.percent}%)
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between bg-slate-900/60 border border-slate-800 rounded-xl p-3">
+              <div>
+                <div className="text-xs font-medium text-slate-300">チャット履歴＆成果物キャッシュのクリア</div>
+                <div className="text-[10px] text-slate-500 mt-0.5">
+                  ※ ドキュメント（ソースファイル）は残し、蓄積したチャットとStudio出力を削除して空き容量を確保します
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleClearCache}
+                disabled={isClearingCache}
+                className="px-3 py-1.5 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-500/40 hover:border-rose-400 text-rose-300 rounded-lg text-xs font-semibold transition-all flex items-center space-x-1 shrink-0 ml-3 disabled:opacity-50"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isClearingCache ? '削除中...' : clearCacheSuccess ? 'クリア完了' : 'キャッシュ削除'}</span>
+              </button>
+            </div>
+          </div>
         </div>
 
         <div className="flex justify-end pt-1">

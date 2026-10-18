@@ -420,6 +420,38 @@ class IndexedDBManager {
 
     return importedProject;
   }
+
+  /**
+   * ブラウザストレージの現在の推定使用量と割り当て上限を取得
+   */
+  public async getStorageUsage(): Promise<{ usedBytes: number; quotaBytes: number; percent: number }> {
+    if (navigator.storage && navigator.storage.estimate) {
+      try {
+        const estimate = await navigator.storage.estimate();
+        const used = estimate.usage || 0;
+        const quota = estimate.quota || 0;
+        const percent = quota > 0 ? (used / quota) * 100 : 0;
+        return { usedBytes: used, quotaBytes: quota, percent };
+      } catch {
+        // フォールバック
+      }
+    }
+    return { usedBytes: 0, quotaBytes: 0, percent: 0 };
+  }
+
+  /**
+   * チャット履歴およびStudio生成物（キャッシュデータ）を一括クリアして容量を削減
+   */
+  public async clearCacheData(): Promise<void> {
+    const db = await this.getDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(['messages', 'artifacts'], 'readwrite');
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.objectStore('messages').clear();
+      tx.objectStore('artifacts').clear();
+    });
+  }
 }
 
 export const dbService = new IndexedDBManager();

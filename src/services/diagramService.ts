@@ -175,7 +175,7 @@ export class DiagramService {
   }
 
   /**
-   * 3Dナレッジグラフ用JSONの安全なパース
+   * 3Dナレッジグラフ用JSONの安全なパース（小型LLMのJSON崩れ・末尾カンマ・Markdown記号を完全自動復元）
    */
   public static parseKnowledgeGraph(rawText: string): { nodes: any[]; links: any[] } {
     let jsonStr = rawText;
@@ -184,7 +184,58 @@ export class DiagramService {
       jsonStr = match[1];
     }
 
-    const parsed = JSON.parse(jsonStr.trim());
+    // 1. JSONオブジェクト部分を最短/最長境界から抽出
+    const startIdx = jsonStr.indexOf('{');
+    const endIdx = jsonStr.lastIndexOf('}');
+    if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+      jsonStr = jsonStr.substring(startIdx, endIdx + 1);
+    }
+
+    // 2. よくある小型LLMの文法エラー（末尾カンマ）を正規表現で自動修復
+    jsonStr = jsonStr
+      .replace(/,\s*([}\]])/g, '$1') // ,} や ,] を } や ] に修正
+      .replace(/([{,]\s*)([a-zA-Z0-9_]+)\s*:/g, '$1"$2":') // クォートなしキーをダブルクォート化
+      .replace(/[\u0000-\u001F]+/g, ' '); // 制御文字の除去
+
+    let parsed: any = null;
+    try {
+      parsed = JSON.parse(jsonStr.trim());
+    } catch {
+      // 3. パース失敗時のフォールバック: 箇条書きやテキストからノードとリンクを決定論的に抽出
+      const lines = rawText.split('\n').map(l => l.trim()).filter(l => l.length > 0 && !l.startsWith('```'));
+      const fallbackNodes: any[] = [];
+      const fallbackLinks: any[] = [];
+      const seen = new Set<string>();
+
+      lines.forEach((l, idx) => {
+        const clean = l.replace(/^[-*・\d.]+\s*/, '').replace(/[:：]/g, ' - ').trim();
+        const parts = clean.split(/\s*(?:->|→|ー|--|-)\s*/);
+        if (parts.length >= 2) {
+          const src = parts[0].trim().slice(0, 20);
+          const tgt = parts[1].trim().slice(0, 20);
+          if (src && tgt) {
+            if (!seen.has(src)) { seen.add(src); fallbackNodes.push({ id: src, name: src, val: 12, color: '#6366f1' }); }
+            if (!seen.has(tgt)) { seen.add(tgt); fallbackNodes.push({ id: tgt, name: tgt, val: 10, color: '#10b981' }); }
+            fallbackLinks.push({ source: src, target: tgt, label: '関連' });
+          }
+        } else if (clean.length > 2 && idx < 12) {
+          const name = clean.slice(0, 20);
+          if (!seen.has(name)) {
+            seen.add(name);
+            fallbackNodes.push({ id: name, name, val: idx === 0 ? 16 : 8, color: idx === 0 ? '#6366f1' : '#f59e0b' });
+            if (fallbackNodes.length > 1) {
+              fallbackLinks.push({ source: fallbackNodes[0].id, target: name, label: '要素' });
+            }
+          }
+        }
+      });
+
+      if (fallbackNodes.length > 0) {
+        return { nodes: fallbackNodes, links: fallbackLinks };
+      }
+      throw new Error('ノード(nodes)およびリンク(links)の配列を復元できませんでした');
+    }
+
     if (!parsed || !Array.isArray(parsed.nodes) || !Array.isArray(parsed.links)) {
       throw new Error('ノード(nodes)およびリンク(links)の配列が含まれていません');
     }
