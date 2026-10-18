@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Bot, User, Sparkles, ChevronDown, ChevronUp, FileText, Zap, PlusCircle, Trash2, RotateCcw, Mic, MicOff, Volume2, ExternalLink, X } from 'lucide-react';
-import { marked } from 'marked';
+import { MarkdownViewer } from './MarkdownViewer.tsx';
 import { ChatMessage, SourceReference } from '../types/index.ts';
 
 interface ChatPaneProps {
@@ -215,25 +215,12 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                 )}
 
                 {/* 本文 (Markdown対応 & インライン引用バッジ対応) */}
-                <div
-                  className={`prose prose-sm max-w-none leading-relaxed ${
-                    msg.role === 'user' ? 'text-white [&_*]:!text-white' : 'prose-invert text-slate-200'
-                  }`}
-                  onClick={(e) => {
-                    const target = (e.target as HTMLElement).closest('[data-ref-idx]');
-                    if (target) {
-                      const idx = parseInt(target.getAttribute('data-ref-idx') || '0', 10);
-                      const src = msg.sources?.[idx - 1];
-                      if (src) {
-                        setActiveReference({ src, index: idx });
-                      }
-                    }
-                  }}
-                  dangerouslySetInnerHTML={{
-                    __html: (marked.parse(msg.content) as string).replace(
-                      /\[(\d+)\]/g,
-                      '<button type="button" data-ref-idx="$1" class="inline-flex items-center justify-center px-1.5 py-0.2 mx-0.5 text-[10px] font-bold font-mono bg-indigo-500/20 hover:bg-indigo-500 text-indigo-300 hover:text-white border border-indigo-500/40 rounded cursor-pointer transition-all shadow-sm active:scale-95" title="クリックして根拠原文 [$1] を表示">[$1]</button>'
-                    )
+                <MarkdownViewer
+                  content={msg.content}
+                  sources={msg.sources}
+                  isUser={msg.role === 'user'}
+                  onSelectReference={(ref) => {
+                    setActiveReference(ref);
                   }}
                 />
 
