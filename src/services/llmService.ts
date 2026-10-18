@@ -37,8 +37,11 @@ class LLMService {
     abortSignal?: AbortSignal
   ): AsyncIterable<string> {
     const cleanApiKey = apiKey.trim();
+    const specified = modelName?.trim();
     const candidateModels = [
-      modelName?.includes('gemini') ? modelName : 'gemini-2.5-flash',
+      ...(specified ? [specified] : []),
+      'gemma-4-26b-a4b-it',
+      'gemma-4-31b-it',
       'gemini-2.5-flash',
       'gemini-2.0-flash',
       'gemini-2.5-flash-lite'
@@ -391,12 +394,13 @@ class LLMService {
       }
     }
 
-    // ☁️ クラウド Gemini API モード（明示的に cloud-gemini が選択されている場合）
+    // ☁️ クラウド Google API モード（Gemini / Gemma 4 クラウド推論）
     if (config.mode === 'cloud-gemini') {
       if (!config.cloudApiKey) {
-        throw new Error('Google Gemini APIキーが未入力です。「⚙️設定」からAPIキーを入力するか、ローカル推論またはブラウザ内推論（WebLLM）をお選びください。');
+        throw new Error('Google APIキーが未入力です。「⚙️設定」からAPIキーを入力するか、ローカル推論またはブラウザ内推論（WebLLM）をお選びください。');
       }
-      yield* this.streamGeminiDirect(config.cloudApiKey, config.desktopModelName || 'gemini-1.5-flash', messages, config.temperature, abortSignal);
+      const targetCloudModel = config.cloudModelName || config.desktopModelName || 'gemma-4-26b-a4b-it';
+      yield* this.streamGeminiDirect(config.cloudApiKey, targetCloudModel, messages, config.temperature, abortSignal);
       return;
     }
 

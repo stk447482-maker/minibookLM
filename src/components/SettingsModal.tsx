@@ -746,6 +746,97 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
         )}
 
+        {/* ☁️ Google クラウド（Gemini / Gemma 4）詳細設定 */}
+        {config.mode === 'cloud-gemini' && (
+          <div className="bg-slate-950/80 p-4 rounded-xl border border-indigo-500/40 space-y-3.5">
+            <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+              <div className="flex items-center space-x-2">
+                <Cloud className="w-4 h-4 text-indigo-400" />
+                <h4 className="text-xs font-bold text-slate-200">Google クラウド AIモデル選択</h4>
+              </div>
+              <span className="text-[10px] bg-indigo-500/10 text-indigo-300 border border-indigo-500/30 px-2 py-0.5 rounded font-mono">
+                Google AI Studio API
+              </span>
+            </div>
+
+            <div>
+              <label className="text-[10px] text-slate-400 block mb-1 font-medium">
+                利用モデルを選択（同一のGoogle APIキーで実行可能）
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => onChangeConfig({ ...config, cloudModelName: 'gemma-4-26b-a4b-it' })}
+                  className={`p-2.5 rounded-xl border text-left transition-all ${
+                    (config.cloudModelName === 'gemma-4-26b-a4b-it' || !config.cloudModelName)
+                      ? 'bg-indigo-950/50 border-indigo-500 text-indigo-200 shadow-md shadow-indigo-500/10'
+                      : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:border-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-200">🌸 Gemma 4 26B A4B</span>
+                    {(config.cloudModelName === 'gemma-4-26b-a4b-it' || !config.cloudModelName) && (
+                      <Check className="w-3.5 h-3.5 text-indigo-400" />
+                    )}
+                  </div>
+                  <span className="text-[9px] font-mono bg-indigo-900/40 text-indigo-300 px-1 rounded mt-1 inline-block">
+                    MoE / 4B稼働
+                  </span>
+                  <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
+                    【携帯・スマホ推奨】圧倒的ハイスピード生成。長文RAGや要約が爆速
+                  </p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => onChangeConfig({ ...config, cloudModelName: 'gemma-4-31b-it' })}
+                  className={`p-2.5 rounded-xl border text-left transition-all ${
+                    config.cloudModelName === 'gemma-4-31b-it'
+                      ? 'bg-indigo-950/50 border-indigo-500 text-indigo-200 shadow-md shadow-indigo-500/10'
+                      : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:border-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-200">🧠 Gemma 4 31B</span>
+                    {config.cloudModelName === 'gemma-4-31b-it' && (
+                      <Check className="w-3.5 h-3.5 text-indigo-400" />
+                    )}
+                  </div>
+                  <span className="text-[9px] font-mono bg-indigo-900/40 text-indigo-300 px-1 rounded mt-1 inline-block">
+                    Dense / 31B全計算
+                  </span>
+                  <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
+                    高度推論・緻密な論理構築・学術レポート作成重視
+                  </p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => onChangeConfig({ ...config, cloudModelName: 'gemini-2.5-flash' })}
+                  className={`p-2.5 rounded-xl border text-left transition-all ${
+                    config.cloudModelName === 'gemini-2.5-flash'
+                      ? 'bg-indigo-950/50 border-indigo-500 text-indigo-200 shadow-md shadow-indigo-500/10'
+                      : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:border-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-200">💎 Gemini 2.5 Flash</span>
+                    {config.cloudModelName === 'gemini-2.5-flash' && (
+                      <Check className="w-3.5 h-3.5 text-indigo-400" />
+                    )}
+                  </div>
+                  <span className="text-[9px] font-mono bg-indigo-900/40 text-indigo-300 px-1 rounded mt-1 inline-block">
+                    Multimodal
+                  </span>
+                  <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
+                    Google公式の標準フラグシップ。万能・低遅延
+                  </p>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* 🎙️ 音声文字起こしエンジン設定 */}
         <div className="space-y-2.5 bg-slate-950/80 p-3.5 rounded-xl border border-slate-800">
           <div className="flex items-center justify-between">

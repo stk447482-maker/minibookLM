@@ -25,6 +25,7 @@ export interface ModelConfig {
   autoTuningEnabled?: boolean;
   tuningProfile?: ModelTuningProfile;
   cloudApiKey?: string;
+  cloudModelName?: string;
   temperature: number;
   audioTranscriptionEngine?: 'auto' | 'gemini' | 'whisper-small' | 'whisper-large-v3' | 'kotoba-whisper' | 'native-large-v3' | 'native-kotoba' | 'whisper-local';
   enableAudioContextRefiner?: boolean;
