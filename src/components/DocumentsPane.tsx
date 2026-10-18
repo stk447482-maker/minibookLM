@@ -91,6 +91,12 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
   const [isFetchingUrl, setIsFetchingUrl] = useState(false);
   const [urlFetchStatus, setUrlFetchStatus] = useState<string>('');
   const [urlFetchError, setUrlFetchError] = useState<string | null>(null);
+  const [youtubeFallback, setYoutubeFallback] = useState<{
+    videoId: string;
+    videoTitle: string;
+    url: string;
+  } | null>(null);
+  const fallbackFileInputRef = useRef<HTMLInputElement>(null);
 
   const enabledCount = documents.filter(d => d.enabled).length;
   const isAllSelected = documents.length > 0 && enabledCount === documents.length;
@@ -259,14 +265,19 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
             setUrlInput('');
             setShowUrlModal(false);
             setUrlFetchStatus('');
+            setYoutubeFallback(null);
             return;
           } catch (audioErr: any) {
             console.warn('YouTube audio extraction failed:', audioErr);
-            throw new Error(
-              `YouTube動画「${videoTitle}」から字幕・音声を自動取得できませんでした。\n\n` +
-              `【理由】動画配信サーバーからの音声ストリーム抽出に失敗しました。\n` +
-              `【確実な対策】動画の音声（mp3/m4a/wav）をPCに保存し、左側のエリアにドラッグ＆ドロップしてください。内蔵のWhisperが発話音声を100%正確に文字起こしします。`
-            );
+            // 💡 A・Bハイブリッド: エラーで突き放さず、スマート音声取り込みモード（ワンクリック案内＋D&D）に移行
+            setYoutubeFallback({
+              videoId,
+              videoTitle,
+              url: rawUrl
+            });
+            setIsFetchingUrl(false);
+            setUrlFetchStatus('');
+            return;
           }
         }
 
@@ -854,67 +865,161 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleUrlImport} className="space-y-3">
-              <div>
-                <label className="text-xs font-semibold text-slate-300 block mb-1.5">
-                  URLを入力:
-                </label>
-                <input
-                  type="url"
-                  required
-                  placeholder="https://example.com/article または https://youtu.be/..."
-                  value={urlInput}
-                  onChange={(e) => setUrlInput(e.target.value)}
-                  disabled={isFetchingUrl}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500"
-                />
-              </div>
-
-              <div className="p-2.5 bg-slate-950/60 rounded-xl border border-slate-800 text-[11px] text-slate-400 space-y-1">
-                <div className="flex items-center space-x-1.5 text-slate-300 font-semibold">
-                  <Sparkles className="w-3 h-3 text-amber-400" />
-                  <span>自動クリーン＆インデックス機能:</span>
+            {youtubeFallback ? (
+              <div className="space-y-3.5">
+                <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl space-y-1.5">
+                  <div className="flex items-center space-x-2 text-amber-400 font-semibold text-xs">
+                    <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>公式字幕が無効な動画を検出しました</span>
+                  </div>
+                  <p className="text-[11px] text-slate-300 leading-relaxed">
+                    動画「<strong className="text-white font-medium">{youtubeFallback.videoTitle}</strong>」はYouTube側で字幕が無効化・保護されています。
+                  </p>
+                  <p className="text-[11px] text-slate-400">
+                    アプリ内蔵のWhisper音声認識で100%正確に文字起こしするため、音声ファイル（mp3/m4a等）を下記に投入してください。
+                  </p>
                 </div>
-                <ul className="list-disc pl-4 space-y-0.5 text-slate-400 text-[10px]">
-                  <li>Web記事: 広告やナビゲーションを除去し、本文をMarkdown化して即座にRAG索引化。</li>
-                  <li>YouTube: 動画の字幕・文字起こしデータを自動取得し、タイムスタンプ付きで索引化。</li>
-                </ul>
-              </div>
 
-              {urlFetchError && (
-                <div className="p-2 rounded-lg bg-rose-500/10 border border-rose-500/30 text-[11px] text-rose-300">
-                  ⚠️ {urlFetchError}
+                {/* 便利なワンクリック外部音声ダウンロード支援 */}
+                <div className="flex items-center justify-between p-2.5 bg-slate-950/80 rounded-xl border border-slate-800 text-xs">
+                  <div className="text-[11px] text-slate-400">
+                    💡 まだ音声をお持ちでない場合:
+                  </div>
+                  <a
+                    href={`https://cobalt.tools/#${encodeURIComponent(youtubeFallback.url)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center space-x-1 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-cyan-400 text-[11px] font-medium rounded-lg border border-slate-700 hover:border-cyan-500/50 transition-colors"
+                  >
+                    <span>音声保存ツールを開く ↗</span>
+                  </a>
                 </div>
-              )}
 
-              <div className="flex items-center justify-end space-x-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowUrlModal(false)}
-                  disabled={isFetchingUrl}
-                  className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 rounded-lg transition-colors"
+                {/* ドロップゾーン＆ファイル選択 */}
+                <div
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                      onUpload(e.dataTransfer.files);
+                      setShowUrlModal(false);
+                      setYoutubeFallback(null);
+                    }
+                  }}
+                  onClick={() => fallbackFileInputRef.current?.click()}
+                  className="border-2 border-dashed border-cyan-500/40 hover:border-cyan-400 bg-cyan-950/20 hover:bg-cyan-950/30 rounded-2xl p-6 text-center cursor-pointer transition-all space-y-2 group"
                 >
-                  キャンセル
-                </button>
-                <button
-                  type="submit"
-                  disabled={isFetchingUrl || !urlInput.trim()}
-                  className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white text-xs font-semibold rounded-xl shadow-lg shadow-cyan-900/40 transition-all flex items-center space-x-1.5"
-                >
-                  {isFetchingUrl ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      <span>{urlFetchStatus || '解析＆取り込み中...'}</span>
-                    </>
-                  ) : (
-                    <>
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>ドキュメントに追加</span>
-                    </>
-                  )}
-                </button>
+                  <input
+                    ref={fallbackFileInputRef}
+                    type="file"
+                    accept="audio/*,video/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      if (e.target.files && e.target.files.length > 0) {
+                        onUpload(e.target.files);
+                        setShowUrlModal(false);
+                        setYoutubeFallback(null);
+                      }
+                    }}
+                  />
+                  <div className="w-10 h-10 mx-auto rounded-xl bg-cyan-500/20 flex items-center justify-center text-cyan-400 group-hover:scale-110 transition-transform">
+                    <Mic className="w-5 h-5" />
+                  </div>
+                  <div className="text-xs font-semibold text-slate-200">
+                    ここに音声ファイルをドラッグ＆ドロップ
+                  </div>
+                  <div className="text-[10px] text-slate-400">
+                    またはクリックしてファイル選択（mp3, m4a, wav 等）
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setYoutubeFallback(null);
+                      setUrlInput('');
+                    }}
+                    className="text-xs text-slate-400 hover:text-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-800"
+                  >
+                    ← URL入力に戻る
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowUrlModal(false);
+                      setYoutubeFallback(null);
+                      setUrlInput('');
+                    }}
+                    className="text-xs text-slate-400 hover:text-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-800"
+                  >
+                    閉じる
+                  </button>
+                </div>
               </div>
-            </form>
+            ) : (
+              <form onSubmit={handleUrlImport} className="space-y-3">
+                <div>
+                  <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                    URLを入力:
+                  </label>
+                  <input
+                    type="url"
+                    required
+                    placeholder="https://example.com/article または https://youtu.be/..."
+                    value={urlInput}
+                    onChange={(e) => setUrlInput(e.target.value)}
+                    disabled={isFetchingUrl}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500"
+                  />
+                </div>
+
+                <div className="p-2.5 bg-slate-950/60 rounded-xl border border-slate-800 text-[11px] text-slate-400 space-y-1">
+                  <div className="flex items-center space-x-1.5 text-slate-300 font-semibold">
+                    <Sparkles className="w-3 h-3 text-amber-400" />
+                    <span>A/Bハイブリッド自動解析:</span>
+                  </div>
+                  <ul className="list-disc pl-4 space-y-0.5 text-slate-400 text-[10px]">
+                    <li>公式字幕のある動画: 1秒で字幕・タイムスタンプを自動抽出し即時完了。</li>
+                    <li>字幕保護・非公開動画: ワンクリックで音声認識パイプライン（Whisper）に直結。</li>
+                  </ul>
+                </div>
+
+                {urlFetchError && (
+                  <div className="p-2 rounded-lg bg-rose-500/10 border border-rose-500/30 text-[11px] text-rose-300">
+                    ⚠️ {urlFetchError}
+                  </div>
+                )}
+
+                <div className="flex items-center justify-end space-x-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowUrlModal(false)}
+                    disabled={isFetchingUrl}
+                    className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 rounded-lg transition-colors"
+                  >
+                    キャンセル
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isFetchingUrl || !urlInput.trim()}
+                    className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white text-xs font-semibold rounded-xl shadow-lg shadow-cyan-900/40 transition-all flex items-center space-x-1.5"
+                  >
+                    {isFetchingUrl ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>{urlFetchStatus || '解析＆取り込み中...'}</span>
+                      </>
+                    ) : (
+                      <>
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>ドキュメントに追加</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}
