@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, lazy, Suspense } from 'react';
 import {
   FileText,
   Presentation,
@@ -24,12 +24,13 @@ import {
 } from 'lucide-react';
 import { marked } from 'marked';
 import { StudioTab, StudioArtifact, ModelConfig } from '../types/index.ts';
-import { MermaidViewer } from './studio/MermaidViewer.tsx';
-import { SlideViewer } from './studio/SlideViewer.tsx';
-import { PodcastPlayer } from './studio/PodcastPlayer.tsx';
-import { Graph3DViewer } from './studio/Graph3DViewer.tsx';
-import { FaqViewer } from './studio/FaqViewer.tsx';
-import { QuizFlashcardViewer } from './studio/QuizFlashcardViewer.tsx';
+
+const MermaidViewer = lazy(() => import('./studio/MermaidViewer.tsx').then(m => ({ default: m.MermaidViewer })));
+const SlideViewer = lazy(() => import('./studio/SlideViewer.tsx').then(m => ({ default: m.SlideViewer })));
+const PodcastPlayer = lazy(() => import('./studio/PodcastPlayer.tsx').then(m => ({ default: m.PodcastPlayer })));
+const Graph3DViewer = lazy(() => import('./studio/Graph3DViewer.tsx').then(m => ({ default: m.Graph3DViewer })));
+const FaqViewer = lazy(() => import('./studio/FaqViewer.tsx').then(m => ({ default: m.FaqViewer })));
+const QuizFlashcardViewer = lazy(() => import('./studio/QuizFlashcardViewer.tsx').then(m => ({ default: m.QuizFlashcardViewer })));
 
 interface StudioPaneProps {
   config?: ModelConfig;
@@ -621,23 +622,32 @@ ${currentArtifact.content}
                     placeholder="Markdown / ダイアグラム定義を直接編集..."
                   />
                 </div>
-              ) : activeTab === 'slide' ? (
-                <SlideViewer content={currentArtifact.content} />
-              ) : activeTab === 'mindmap' || activeTab === 'flowchart' ? (
-                <MermaidViewer chart={currentArtifact.content} />
-              ) : activeTab === 'graph3d' ? (
-                <Graph3DViewer dataString={currentArtifact.content} />
-              ) : activeTab === 'podcast' ? (
-                <PodcastPlayer script={currentArtifact.content} config={config} />
-              ) : activeTab === 'faq' ? (
-                <FaqViewer content={currentArtifact.content} />
-              ) : activeTab === 'quiz' ? (
-                <QuizFlashcardViewer content={currentArtifact.content} />
               ) : (
-                <div
-                  className="prose prose-invert prose-sm max-w-none text-xs leading-relaxed"
-                  dangerouslySetInnerHTML={{ __html: marked.parse(currentArtifact.content) as string }}
-                />
+                <Suspense fallback={
+                  <div className="h-48 flex flex-col items-center justify-center space-y-2 text-slate-400">
+                    <Loader2 className="w-5 h-5 text-indigo-400 animate-spin" />
+                    <span className="text-xs">ビューワー読込中...</span>
+                  </div>
+                }>
+                  {activeTab === 'slide' ? (
+                    <SlideViewer content={currentArtifact.content} />
+                  ) : activeTab === 'mindmap' || activeTab === 'flowchart' ? (
+                    <MermaidViewer chart={currentArtifact.content} />
+                  ) : activeTab === 'graph3d' ? (
+                    <Graph3DViewer dataString={currentArtifact.content} />
+                  ) : activeTab === 'podcast' ? (
+                    <PodcastPlayer script={currentArtifact.content} config={config} />
+                  ) : activeTab === 'faq' ? (
+                    <FaqViewer content={currentArtifact.content} />
+                  ) : activeTab === 'quiz' ? (
+                    <QuizFlashcardViewer content={currentArtifact.content} />
+                  ) : (
+                    <div
+                      className="prose prose-invert prose-sm max-w-none text-xs leading-relaxed"
+                      dangerouslySetInnerHTML={{ __html: marked.parse(currentArtifact.content) as string }}
+                    />
+                  )}
+                </Suspense>
               )}
             </div>
           </div>
