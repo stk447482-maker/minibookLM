@@ -126,7 +126,11 @@ class LLMService {
         if (err.message && err.message.includes('404')) {
           continue;
         }
-        lastError = err;
+        if (err.name === 'TypeError' && err.message && err.message.includes('fetch')) {
+          lastError = new Error(`Google API通信エラー (${err.message}): ブラウザからの直接通信が制限されているか、ネットワーク/広告ブロッカーでブロックされた可能性があります。APIキーまたは接続環境をご確認いただくか、設定で「⚡ ブラウザ内 WebGPU」または「💻 デスクトップ」モードをお試しください。`);
+        } else {
+          lastError = err;
+        }
         break;
       }
     }
