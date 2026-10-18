@@ -93,13 +93,34 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     onGenerate(activeTab, customPrompt.trim() || undefined);
   };
 
-  const handleExport = (format: 'md' | 'html') => {
+  const handleExport = (format: 'md' | 'html' | 'csv') => {
     if (!currentArtifact) return;
 
     let blob: Blob;
     let filename = `${currentArtifact.title}_${Date.now()}`;
 
-    if (format === 'html') {
+    if (format === 'csv') {
+      // 🎯 Markdown テーブルから CSV 形式へパース変換
+      const lines = currentArtifact.content.split('\n');
+      const csvRows: string[] = [];
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
+          // 区切り線 (| :--- | :--- | 等) を除外
+          if (trimmed.includes('---')) continue;
+          const cells = trimmed
+            .slice(1, -1)
+            .split('|')
+            .map(c => `"${c.trim().replace(/"/g, '""')}"`);
+          csvRows.push(cells.join(','));
+        }
+      }
+
+      const csvData = '\uFEFF' + (csvRows.length > 0 ? csvRows.join('\r\n') : currentArtifact.content);
+      blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
+      filename += '.csv';
+    } else if (format === 'html') {
       let fullHtml = '';
 
       if (currentArtifact.type === 'mindmap' || currentArtifact.type === 'flowchart') {
@@ -549,6 +570,16 @@ ${currentArtifact.content}
                       <Download className="w-3.5 h-3.5" />
                       <span>.MD</span>
                     </button>
+                    {(activeTab === 'matrix' || currentArtifact.content.includes('| :---')) && (
+                      <button
+                        onClick={() => handleExport('csv')}
+                        className="p-1 hover:bg-slate-800 text-cyan-400 hover:text-cyan-300 rounded transition-colors text-[10px] flex items-center space-x-0.5"
+                        title="Excelやスプレッドシートで開けるCSV形式で保存"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        <span>.CSV</span>
+                      </button>
+                    )}
                     <button
                       onClick={() => handleExport('html')}
                       className="p-1 hover:bg-slate-800 text-slate-400 hover:text-indigo-400 rounded transition-colors text-[10px] flex items-center space-x-0.5"

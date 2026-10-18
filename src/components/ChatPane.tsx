@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, Sparkles, ChevronDown, ChevronUp, FileText, Zap, PlusCircle, Trash2, RotateCcw, Mic, MicOff, Volume2 } from 'lucide-react';
+import { Send, Bot, User, Sparkles, ChevronDown, ChevronUp, FileText, Zap, PlusCircle, Trash2, RotateCcw, Mic, MicOff, Volume2, ExternalLink, X } from 'lucide-react';
 import { marked } from 'marked';
-import { ChatMessage } from '../types/index.ts';
+import { ChatMessage, SourceReference } from '../types/index.ts';
 
 interface ChatPaneProps {
   messages: ChatMessage[];
@@ -9,6 +9,7 @@ interface ChatPaneProps {
   onClearMessages: () => void;
   onDeleteMessage: (id: string) => void;
   onAddToSource: (title: string, content: string) => void;
+  onViewDocByName?: (docTitle: string) => void;
   isGenerating: boolean;
   statusMessage?: string;
 }
@@ -19,6 +20,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   onClearMessages,
   onDeleteMessage,
   onAddToSource,
+  onViewDocByName,
   isGenerating,
   statusMessage
 }) => {
@@ -26,6 +28,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const [expandedSources, setExpandedSources] = useState<Record<string, boolean>>({});
   const [isListening, setIsListening] = useState(false);
   const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
+  const [activeReference, setActiveReference] = useState<{ src: SourceReference; index: number } | null>(null);
   const recognitionRef = useRef<any>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -216,10 +219,20 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                   className={`prose prose-sm max-w-none leading-relaxed ${
                     msg.role === 'user' ? 'text-white [&_*]:!text-white' : 'prose-invert text-slate-200'
                   }`}
+                  onClick={(e) => {
+                    const target = (e.target as HTMLElement).closest('[data-ref-idx]');
+                    if (target) {
+                      const idx = parseInt(target.getAttribute('data-ref-idx') || '0', 10);
+                      const src = msg.sources?.[idx - 1];
+                      if (src) {
+                        setActiveReference({ src, index: idx });
+                      }
+                    }
+                  }}
                   dangerouslySetInnerHTML={{
                     __html: (marked.parse(msg.content) as string).replace(
                       /\[(\d+)\]/g,
-                      '<span class="inline-flex items-center justify-center px-1.5 py-0.2 mx-0.5 text-[10px] font-bold font-mono bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 rounded cursor-pointer hover:bg-indigo-500 hover:text-white transition-all shadow-sm" title="根拠ソース [$1] を参照">[$1]</span>'
+                      '<button type="button" data-ref-idx="$1" class="inline-flex items-center justify-center px-1.5 py-0.2 mx-0.5 text-[10px] font-bold font-mono bg-indigo-500/20 hover:bg-indigo-500 text-indigo-300 hover:text-white border border-indigo-500/40 rounded cursor-pointer transition-all shadow-sm active:scale-95" title="クリックして根拠原文 [$1] を表示">[$1]</button>'
                     )
                   }}
                 />
@@ -332,6 +345,82 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           </button>
         </form>
       </div>
+
+      {/* 🔍 Click-to-Context: 根拠ソース詳細モーダル */}
+      {activeReference && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-slate-900 border border-slate-700/90 rounded-2xl w-full max-w-lg p-5 shadow-2xl space-y-3.5">
+            <div className="flex items-center justify-between pb-2.5 border-b border-slate-800">
+              <div className="flex items-center space-x-2">
+                <span className="w-5 h-5 rounded-md bg-indigo-600 text-white flex items-center justify-center text-xs font-bold font-mono">
+                  [{activeReference.index}]
+                </span>
+                <h3 className="text-sm font-bold text-slate-100 truncate max-w-[260px] sm:max-w-xs">
+                  {activeReference.src.docTitle}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveReference(null)}
+                className="text-slate-400 hover:text-slate-200 p-1 rounded-lg hover:bg-slate-800 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between text-xs text-slate-400">
+                <span className="text-[11px] font-semibold text-indigo-400">
+                  🎯 RAG 抽出ハイライト
+                </span>
+                <span className="text-[10px] font-mono bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 px-2 py-0.5 rounded">
+                  適合度: {(activeReference.src.score * 100).toFixed(0)}%
+                </span>
+              </div>
+
+              {/* 核心抜粋 */}
+              <div className="p-3 rounded-xl bg-slate-950/80 border border-indigo-500/30 text-xs text-indigo-200 font-medium leading-relaxed">
+                {activeReference.src.snippet}
+              </div>
+
+              {/* 前後の全体文脈 */}
+              <div>
+                <span className="text-[10px] font-semibold text-slate-500 block mb-1">
+                  📄 ドキュメント前後の文脈 (Full Context):
+                </span>
+                <div className="p-3 rounded-xl bg-slate-950/50 border border-slate-800 text-[11px] text-slate-300 max-h-48 overflow-y-auto whitespace-pre-wrap leading-relaxed font-mono">
+                  {activeReference.src.fullContext}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between pt-2 border-t border-slate-800">
+              {onViewDocByName ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const title = activeReference.src.docTitle;
+                    setActiveReference(null);
+                    onViewDocByName(title);
+                  }}
+                  className="flex items-center space-x-1.5 text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>ドキュメント全体を開く</span>
+                </button>
+              ) : <div />}
+
+              <button
+                type="button"
+                onClick={() => setActiveReference(null)}
+                className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition-colors"
+              >
+                閉じる
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -3,7 +3,7 @@
 // [Status] Pass (Harness env checked).
 
 import React, { useState } from 'react';
-import { CheckCircle2, XCircle, RotateCcw, ChevronLeft, ChevronRight, HelpCircle, Layers } from 'lucide-react';
+import { CheckCircle2, XCircle, RotateCcw, ChevronLeft, ChevronRight, HelpCircle, Layers, Download } from 'lucide-react';
 
 interface QuizQuestion {
   question: string;
@@ -106,6 +106,33 @@ export const QuizFlashcardViewer: React.FC<QuizFlashcardViewerProps> = ({ conten
     setIsFlipped(false);
   };
 
+  // Anki用 TSV/TXT エクスポート
+  const handleExportAnki = () => {
+    let tsvContent = '#separator:tab\n#html:true\n';
+    if (mode === 'flashcard' || quizzes.length === 0) {
+      for (const card of flashcards) {
+        const front = card.front.replace(/\t/g, ' ').replace(/\n/g, '<br>');
+        const back = card.back.replace(/\t/g, ' ').replace(/\n/g, '<br>');
+        tsvContent += `${front}\t${back}\n`;
+      }
+    } else {
+      for (const q of quizzes) {
+        const optionsList = q.options.map((opt, i) => `${['A', 'B', 'C', 'D'][i]}. ${opt}`).join('<br>');
+        const front = `<b>${q.question}</b><br><br>${optionsList}`;
+        const back = `<b>正解:</b> ${['A', 'B', 'C', 'D'][q.correctIndex]}. ${q.options[q.correctIndex]}<br><br>💡 ${q.explanation}`;
+        tsvContent += `${front}\t${back}\n`;
+      }
+    }
+
+    const blob = new Blob([tsvContent], { type: 'text/tab-separated-values;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Anki_Flashcards_${Date.now()}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const score = quizzes.reduce((acc, q, idx) => {
     return acc + (selectedAnswers[idx] === q.correctIndex ? 1 : 0);
   }, 0);
@@ -141,15 +168,26 @@ export const QuizFlashcardViewer: React.FC<QuizFlashcardViewerProps> = ({ conten
           </button>
         </div>
 
-        <button
-          type="button"
-          onClick={handleReset}
-          className="flex items-center space-x-1 text-slate-400 hover:text-slate-200 text-xs px-2 py-1 rounded bg-slate-800/60 hover:bg-slate-800"
-          title="リセット"
-        >
-          <RotateCcw className="w-3 h-3" />
-          <span>最初から</span>
-        </button>
+        <div className="flex items-center space-x-1.5">
+          <button
+            type="button"
+            onClick={handleExportAnki}
+            className="flex items-center space-x-1 text-slate-300 hover:text-indigo-300 text-xs px-2.5 py-1 rounded-lg bg-slate-800 border border-slate-700 hover:border-indigo-500/50 transition-all"
+            title="Ankiアプリに取り込めるTSV形式でダウンロード"
+          >
+            <Download className="w-3 h-3 text-indigo-400" />
+            <span>Anki保存</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleReset}
+            className="flex items-center space-x-1 text-slate-400 hover:text-slate-200 text-xs px-2 py-1 rounded bg-slate-800/60 hover:bg-slate-800"
+            title="リセット"
+          >
+            <RotateCcw className="w-3 h-3" />
+            <span>最初から</span>
+          </button>
+        </div>
       </div>
 
       {mode === 'quiz' ? (

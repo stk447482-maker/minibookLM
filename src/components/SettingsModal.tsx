@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Smartphone, Laptop, Sparkles, Check, Cloud, Key, Folder, RefreshCw, Zap, Download, Database, Cpu, Volume2 } from 'lucide-react';
 import { ModelConfig, ModelMode, ModelTuningProfile } from '../types/index.ts';
 
@@ -177,6 +177,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   // モバイルダウンロード状態管理
   const [downloadProgress, setDownloadProgress] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState<boolean>(false);
+
+  // ブラウザ内モデルキャッシュ・ストレージ使用量
+  const [storageEstimate, setStorageEstimate] = useState<{ usageMB: number; quotaMB: number } | null>(null);
+
+  useEffect(() => {
+    if (isOpen && navigator.storage && navigator.storage.estimate) {
+      navigator.storage.estimate().then((est) => {
+        if (est.usage !== undefined && est.quota !== undefined) {
+          setStorageEstimate({
+            usageMB: Math.round(est.usage / (1024 * 1024)),
+            quotaMB: Math.round(est.quota / (1024 * 1024))
+          });
+        }
+      }).catch(() => {});
+    }
+  }, [isOpen]);
 
   // PCモデルフォルダのスキャン実行 (Ollama/ローカルAPI接続時のみ)
   const handleScanModels = async (customFolder?: string) => {
@@ -692,6 +708,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <Database className="w-4 h-4" />
                 <span>推奨モデル・ワンタップダウンロード＆自動設定</span>
               </div>
+              {storageEstimate && (
+                <span className="text-[10px] font-mono text-slate-400 bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
+                  💾 キャッシュ使用: <span className="text-emerald-400 font-bold">{storageEstimate.usageMB} MB</span> / {storageEstimate.quotaMB} MB
+                </span>
+              )}
             </div>
 
             <div className="space-y-2.5">

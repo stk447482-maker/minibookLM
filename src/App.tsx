@@ -1276,6 +1276,10 @@ ${fullContext}`;
             onClearMessages={handleClearMessages}
             onDeleteMessage={handleDeleteMessage}
             onAddToSource={handleAddContentToSource}
+            onViewDocByName={(title) => {
+              const matched = documents.find(d => d.title === title || d.title.includes(title));
+              if (matched) setSelectedDocForModal(matched);
+            }}
             isGenerating={isGenerating}
             statusMessage={statusMessage}
           />
