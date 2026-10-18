@@ -52,7 +52,6 @@ class LLMService {
     let lastError: Error | null = null;
     for (const targetModel of modelsToTry) {
       if (abortSignal?.aborted) break;
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:streamGenerateContent?alt=sse&key=${cleanApiKey}`;
 
       // 🔄 ロール交差ルール（user ⇔ model）の厳格な正規化（連続する同ロールを自動統合）
       const contents: { role: 'user' | 'model'; parts: { text: string }[] }[] = [];
@@ -87,59 +86,91 @@ class LLMService {
         payload.systemInstruction = systemInstruction;
       }
 
-      // 1. まずストリーミング (streamGenerateContent) を試行
-      try {
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-          signal: abortSignal
-        });
+      // 🌐 通信エンドポイント候補の構築（直接通信 ＋ 複数CORS中継リレー）
+      const baseApiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}`;
+      const directStreamUrl = `${baseApiUrl}:streamGenerateContent?alt=sse&key=${cleanApiKey}`;
+      const directSyncUrl = `${baseApiUrl}:generateContent?key=${cleanApiKey}`;
 
-        if (res.status === 404) {
-          continue;
-        }
+      // CORS遮断回避用のリレーエンドポイント候補（順次フォールバック）
+      const streamUrlsToTry = [
+        directStreamUrl,
+        `https://corsproxy.io/?url=${encodeURIComponent(directStreamUrl)}`,
+        `https://api.allorigins.win/raw?url=${encodeURIComponent(directStreamUrl)}`
+      ];
 
-        if (!res.ok) {
-          const errText = await res.text();
-          throw new Error(`Gemini APIエラー (${res.status}): ${errText}`);
-        }
+      const syncUrlsToTry = [
+        directSyncUrl,
+        `https://corsproxy.io/?url=${encodeURIComponent(directSyncUrl)}`,
+        `https://api.allorigins.win/raw?url=${encodeURIComponent(directSyncUrl)}`
+      ];
 
-        const reader = res.body?.getReader();
-        if (!reader) throw new Error('ReadableStreamを利用できません');
+      // 1. ストリーミング (streamGenerateContent) 試行
+      let streamSucceeded = false;
+      for (const sUrl of streamUrlsToTry) {
+        if (abortSignal?.aborted) break;
+        try {
+          const res = await fetch(sUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            signal: abortSignal
+          });
 
-        const decoder = new TextDecoder();
-        let buffer = '';
+          if (res.status === 404) {
+            // モデル非対応の場合は次のモデルへ
+            break;
+          }
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+          if (!res.ok) {
+            continue; // 次のリレー候補へ
+          }
 
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
+          const reader = res.body?.getReader();
+          if (!reader) continue;
 
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const dataStr = line.slice(6).trim();
-              if (!dataStr) continue;
-              try {
-                const data = JSON.parse(dataStr);
-                const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-                if (text) yield text;
-              } catch {}
+          const decoder = new TextDecoder();
+          let buffer = '';
+          let receivedAnyText = false;
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                const dataStr = line.slice(6).trim();
+                if (!dataStr) continue;
+                try {
+                  const data = JSON.parse(dataStr);
+                  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+                  if (text) {
+                    receivedAnyText = true;
+                    yield text;
+                  }
+                } catch {}
+              }
             }
           }
-        }
-        return; // ストリーミング成功
-      } catch (err: any) {
-        if (err.message && err.message.includes('404')) {
-          continue;
-        }
 
-        // 2. ストリーミングがネットワーク/CORS等で弾かれた場合、通常生成 (generateContent) で即座に代替フォールバック試行
+          if (receivedAnyText) {
+            streamSucceeded = true;
+            return; // ストリーミング完了
+          }
+        } catch {
+          // 次のプロキシ候補へ
+        }
+      }
+
+      if (streamSucceeded) return;
+
+      // 2. ストリーミングが全て遮断された場合、通常生成 (generateContent) で中継リレー試行
+      for (const syncUrl of syncUrlsToTry) {
+        if (abortSignal?.aborted) break;
         try {
-          const syncUrl = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${cleanApiKey}`;
           const syncRes = await fetch(syncUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -148,7 +179,7 @@ class LLMService {
           });
 
           if (syncRes.status === 404) {
-            continue;
+            break;
           }
 
           if (syncRes.ok) {
@@ -158,22 +189,13 @@ class LLMService {
               yield text;
               return; // 通常生成成功
             }
-          } else {
-            const errBody = await syncRes.text();
-            lastError = new Error(`Google API応答エラー (${syncRes.status}): ${errBody}`);
-            break;
           }
         } catch {
-          // 通常生成もfetch失敗した場合はブラウザ/ネットワーク制限エラーを案内
+          // 次のリレー候補へ
         }
-
-        if (err.name === 'TypeError' && err.message && err.message.includes('fetch')) {
-          lastError = new Error(`Google API通信エラー (Failed to fetch): ブラウザや広告ブロッカー（AdBlock/Brave等）によって Google API への通信が遮断されています。\n【対策】\n1. 広告ブロッカー・シールドを一時OFFにする\n2. Google AI Studio で API キーの「HTTPリファラー制限」に https://mininotebooklm.web.app/* を許可する\n3. 完全ローカル・端末内で動く「⚡ ブラウザ内 WebGPU」または「💻 デスクトップ」モードに切り替える`);
-        } else {
-          lastError = err;
-        }
-        break;
       }
+
+      lastError = new Error(`Google API通信エラー: ブラウザのセキュリティ設定またはAPIキーの有効性をご確認ください。\n【即座の解決策】\n右上の「⚙️ 設定」を開き、「⚡ 携帯端末 / ブラウザ内 (WebGPU)」を選択すると、端末内推論で通信エラーなしでご利用いただけます。`);
     }
 
     if (lastError) throw lastError;
