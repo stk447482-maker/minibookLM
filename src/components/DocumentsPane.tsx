@@ -47,6 +47,7 @@ interface DocumentsPaneProps {
   onCancelUpload?: () => void;
   audioEngine?: 'auto' | 'gemini' | 'whisper-small' | 'whisper-large-v3' | 'kotoba-whisper' | 'native-large-v3' | 'native-kotoba' | 'whisper-local';
   onChangeAudioEngine?: (engine: 'auto' | 'gemini' | 'whisper-small' | 'whisper-large-v3' | 'kotoba-whisper' | 'native-large-v3' | 'native-kotoba' | 'whisper-local') => void;
+  geminiApiKey?: string;
 }
 
 export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
@@ -73,7 +74,8 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
   processStatusText,
   onCancelUpload,
   audioEngine,
-  onChangeAudioEngine
+  onChangeAudioEngine,
+  geminiApiKey
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -249,7 +251,31 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
           }
         }
 
-        // 🎯 方式 3: 字幕トラックがない場合、音声を自動抽出して内蔵Whisperで文字起こし
+        // 🎯 方式 3: Gemini Multimodal APIによるYouTube動画音声の直接文字起こし（高速・高精度・手動操作ゼロ）
+        if ((!transcriptText || transcriptText.length < 50) && geminiApiKey?.trim()) {
+          try {
+            setUrlFetchStatus('🧠 GeminiマルチモーダルAIがYouTube動画音声を直接解析中...');
+            const geminiTranscript = await YoutubeAudioService.transcribeViaGeminiMultimodal(
+              geminiApiKey,
+              rawUrl,
+              (status) => setUrlFetchStatus(status)
+            );
+
+            if (geminiTranscript && geminiTranscript.length > 50) {
+              const formattedDoc = `## 📺 YouTube動画 文字起こしデータ（Gemini Multimodal直接解析）\n- **URL:** ${rawUrl}\n- **解析エンジン:** Google Gemini Multimodal Video AI\n- **取得時刻:** ${new Date().toLocaleString('ja-JP')}\n\n---\n\n${geminiTranscript}`;
+              await onAddTextContent(`📺 ${videoTitle.slice(0, 35)}`, formattedDoc);
+              setUrlInput('');
+              setShowUrlModal(false);
+              setUrlFetchStatus('');
+              setYoutubeFallback(null);
+              return;
+            }
+          } catch (geminiErr) {
+            console.warn('Gemini multimodal failed, falling back to audio stream/dropzone:', geminiErr);
+          }
+        }
+
+        // 🎯 方式 4: 字幕トラックがない場合、音声を自動抽出して内蔵Whisperで文字起こし
         if (!transcriptText || transcriptText.length < 50) {
           try {
             setUrlFetchStatus('📺 字幕なし動画を検出。音声ストリームを自動抽出中...');
@@ -880,19 +906,33 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
                   </p>
                 </div>
 
-                {/* 便利なワンクリック外部音声ダウンロード支援 */}
-                <div className="flex items-center justify-between p-2.5 bg-slate-950/80 rounded-xl border border-slate-800 text-xs">
-                  <div className="text-[11px] text-slate-400">
-                    💡 まだ音声をお持ちでない場合:
+                {/* 便利なワンクリック支援ツール群 */}
+                <div className="space-y-2 p-3 bg-slate-950/80 rounded-xl border border-slate-800 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] text-slate-300 font-medium">🔖 ブックマークレット（1タップ抽出）:</span>
+                    <a
+                      href="javascript:(function(){const v=document.querySelector('video');if(!v){alert('YouTube動画が見つかりません');return;}const a=document.createElement('a');a.href=v.src;a.download='youtube_audio.mp4';a.click();})();"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        alert('このリンクをブラウザのお気に入りバーにドラッグ＆ドロップしてください。\nYouTube再生中に押すだけで音声を素早くダウンロードできます。');
+                      }}
+                      className="px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-[11px] font-semibold rounded-lg border border-amber-500/30 transition-colors cursor-grab"
+                      title="お気に入りバーにドラッグ＆ドロップして登録"
+                    >
+                      ★ 音声抽出ボタンを登録
+                    </a>
                   </div>
-                  <a
-                    href={`https://cobalt.tools/#${encodeURIComponent(youtubeFallback.url)}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center space-x-1 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-cyan-400 text-[11px] font-medium rounded-lg border border-slate-700 hover:border-cyan-500/50 transition-colors"
-                  >
-                    <span>音声保存ツールを開く ↗</span>
-                  </a>
+                  <div className="flex items-center justify-between pt-1 border-t border-slate-800/60">
+                    <span className="text-[11px] text-slate-400">💡 外部ダウンロード支援:</span>
+                    <a
+                      href={`https://cobalt.tools/#${encodeURIComponent(youtubeFallback.url)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center space-x-1 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-cyan-400 text-[11px] font-medium rounded-lg border border-slate-700 hover:border-cyan-500/50 transition-colors"
+                    >
+                      <span>音声保存ツールを開く ↗</span>
+                    </a>
+                  </div>
                 </div>
 
                 {/* ドロップゾーン＆ファイル選択 */}

@@ -382,6 +382,7 @@ export const App: React.FC = () => {
             onChangeAudioEngine={(engine) => {
               handleUpdateConfig({ ...config, audioTranscriptionEngine: engine });
             }}
+            geminiApiKey={config.cloudApiKey}
           />
         </div>
 
