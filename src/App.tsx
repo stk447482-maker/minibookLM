@@ -382,7 +382,6 @@ export const App: React.FC = () => {
             onChangeAudioEngine={(engine) => {
               handleUpdateConfig({ ...config, audioTranscriptionEngine: engine });
             }}
-            cloudApiKey={config.cloudApiKey}
           />
         </div>
 

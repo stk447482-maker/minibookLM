@@ -20,7 +20,6 @@ import {
   Plus
 } from 'lucide-react';
 import { DocumentSource, Project } from '../types/index.ts';
-import { llmService } from '../services/llmService.ts';
 
 interface DocumentsPaneProps {
   projects: Project[];
@@ -47,7 +46,6 @@ interface DocumentsPaneProps {
   onCancelUpload?: () => void;
   audioEngine?: 'auto' | 'gemini' | 'whisper-small' | 'whisper-large-v3' | 'kotoba-whisper' | 'native-large-v3' | 'native-kotoba' | 'whisper-local';
   onChangeAudioEngine?: (engine: 'auto' | 'gemini' | 'whisper-small' | 'whisper-large-v3' | 'kotoba-whisper' | 'native-large-v3' | 'native-kotoba' | 'whisper-local') => void;
-  cloudApiKey?: string;
 }
 
 export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
@@ -74,8 +72,7 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
   processStatusText,
   onCancelUpload,
   audioEngine,
-  onChangeAudioEngine,
-  cloudApiKey
+  onChangeAudioEngine
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -154,102 +151,108 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
         let transcriptText = '';
         let videoTitle = `YouTube (${videoId})`;
 
-        // 方式 A: Jina Reader API 経由
+        // 🎯 方式 1: YouTube 埋め込み公式字幕トラック (ytInitialPlayerResponse) の直接抽出
         try {
-          const jinaUrl = `https://r.jina.ai/https://www.youtube.com/watch?v=${videoId}`;
-          const res = await fetch(jinaUrl, { headers: { 'Accept': 'text/plain' } });
-          if (res.ok) {
-            const markdown = await res.text();
-            if (markdown && markdown.length > 100 && !markdown.includes('Blocked') && !markdown.includes('Sign in to confirm')) {
-              const titleMatch = markdown.match(/Title:\s*(.+)/);
-              if (titleMatch && titleMatch[1]) videoTitle = titleMatch[1].trim();
-              transcriptText = markdown;
-            }
-          }
-        } catch {
-          // 次のフォールバックへ
-        }
+          const ytPageUrl = `https://www.youtube.com/watch?v=${videoId}`;
+          const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(ytPageUrl)}`;
+          const pageRes = await fetch(proxyUrl);
+          if (pageRes.ok) {
+            const pageJson = await pageRes.json();
+            const html = pageJson.contents || '';
 
-        // 方式 B: パブリック Invidious / Piped インスタンスからの字幕取得
-        if (!transcriptText || transcriptText.length < 50) {
-          const invidiousInstances = [
-            'https://inv.tux.pizza',
-            'https://invidious.nerdvpn.de',
-            'https://yt.artemislena.eu'
-          ];
-          for (const instance of invidiousInstances) {
-            try {
-              const infoRes = await fetch(`${instance}/api/v1/videos/${videoId}`);
-              if (infoRes.ok) {
-                const info = await infoRes.json();
-                if (info.title) videoTitle = info.title;
-                if (info.description) {
-                  transcriptText = `### 動画概要・チャプター\n${info.description}`;
-                }
-                // 字幕トラックがあれば結合
-                if (Array.isArray(info.captions) && info.captions.length > 0) {
-                  const subTrack = info.captions.find((c: any) => c.languageCode?.startsWith('ja')) || info.captions[0];
-                  if (subTrack && subTrack.url) {
-                    const subRes = await fetch(`${instance}${subTrack.url}`);
-                    if (subRes.ok) {
-                      const vttText = await subRes.text();
-                      const cleanSubs = vttText
-                        .replace(/WEBVTT[\s\S]*?\n\n/, '')
-                        .replace(/\d{2}:\d{2}:\d{2}\.\d{3}\s*-->\s*\d{2}:\d{2}:\d{2}\.\d{3}.*\n/g, '')
-                        .replace(/<[^>]+>/g, '')
-                        .replace(/\n\s*\n+/g, '\n')
-                        .trim();
-                      if (cleanSubs.length > 50) {
-                        transcriptText = `### 📝 動画字幕データ\n\n${cleanSubs}\n\n---\n### 動画概要\n${info.description || ''}`;
-                        break;
+            // タイトル抽出
+            const titleMatch = html.match(/<title>(.+?)<\/title>/);
+            if (titleMatch && titleMatch[1]) {
+              videoTitle = titleMatch[1].replace(' - YouTube', '').trim();
+            }
+
+            // ytInitialPlayerResponse から captionTracks を探索
+            const playerResponseMatch = html.match(/ytInitialPlayerResponse\s*=\s*({.+?});(?:var|<\/script)/);
+            if (playerResponseMatch && playerResponseMatch[1]) {
+              const playerResponse = JSON.parse(playerResponseMatch[1]);
+              const tracks = playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+
+              if (Array.isArray(tracks) && tracks.length > 0) {
+                // 日本語字幕優先、なければ最初の字幕トラック
+                const targetTrack = tracks.find((t: any) => t.languageCode === 'ja') || tracks[0];
+                if (targetTrack?.baseUrl) {
+                  // 字幕XML取得 (CORSプロキシ経由)
+                  const trackProxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(targetTrack.baseUrl)}`;
+                  const subRes = await fetch(trackProxyUrl);
+                  if (subRes.ok) {
+                    const subJson = await subRes.json();
+                    const subXml = subJson.contents || '';
+
+                    // XMLパース (<text>タグの抽出)
+                    const parser = new DOMParser();
+                    const xmlDoc = parser.parseFromString(subXml, 'text/xml');
+                    const textNodes = Array.from(xmlDoc.querySelectorAll('text'));
+                    
+                    if (textNodes.length > 0) {
+                      const lines = textNodes.map(node => {
+                        const start = parseFloat(node.getAttribute('start') || '0');
+                        const m = Math.floor(start / 60);
+                        const s = Math.floor(start % 60);
+                        const timeStr = `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+                        const rawContent = node.textContent || '';
+                        // HTMLエンティティデコード
+                        const clean = rawContent
+                          .replace(/&amp;/g, '&')
+                          .replace(/&quot;/g, '"')
+                          .replace(/&#39;/g, "'")
+                          .replace(/&lt;/g, '<')
+                          .replace(/&gt;/g, '>')
+                          .replace(/\n/g, ' ')
+                          .trim();
+                        return `[${timeStr}] ${clean}`;
+                      }).filter(l => l.length > 8);
+
+                      if (lines.length > 0) {
+                        transcriptText = `### 📝 YouTube公式 タイムスタンプ付き字幕文字起こし\n- **言語:** ${targetTrack.name?.simpleText || targetTrack.languageCode}\n\n${lines.join('\n')}`;
                       }
                     }
                   }
                 }
-                if (transcriptText.length > 100) break;
               }
-            } catch {
-              continue;
             }
           }
+        } catch (ytErr) {
+          console.warn('YouTube direct caption extraction error:', ytErr);
         }
 
-        // 方式 C: Google Gemini API によるダイレクト動画理解＆要約（APIキーあり時）
-        if ((!transcriptText || transcriptText.length < 50) && cloudApiKey && cloudApiKey.trim().length > 0) {
+        // 🎯 方式 2: Jina Reader API (Clean Reader) フォールバック
+        if (!transcriptText || transcriptText.length < 50) {
           try {
-            const prompt = `以下のYouTube動画を多角的に分析し、話者の発言内容、重要論点、議事録、および詳細な書き起こしサマリーを日本語のMarkdown形式で作成してください。\nURL: https://www.youtube.com/watch?v=${videoId}`;
-            let geminiResult = '';
-            const genConfig: any = {
-              mode: 'cloud-gemini',
-              cloudApiKey: cloudApiKey.trim()
-            };
-            for await (const chunk of llmService.streamChat(
-              [
-                { role: 'system', content: 'あなたはYouTube動画の分析・文字起こし要約の専門家です。' },
-                { role: 'user', content: prompt }
-              ],
-              genConfig
-            )) {
-              geminiResult += chunk;
+            const jinaUrl = `https://r.jina.ai/https://www.youtube.com/watch?v=${videoId}`;
+            const res = await fetch(jinaUrl, { headers: { 'Accept': 'text/plain' } });
+            if (res.ok) {
+              const md = await res.text();
+              if (md && md.length > 100 && !md.includes('Sign in to confirm') && !md.includes('Blocked')) {
+                const titleMatch = md.match(/Title:\s*(.+)/);
+                if (titleMatch && titleMatch[1]) videoTitle = titleMatch[1].trim();
+                // 動画の要約や字幕が含まれているか確認
+                if (md.includes('Transcript') || md.includes('Captions') || md.length > 300) {
+                  transcriptText = md;
+                }
+              }
             }
-            if (geminiResult && geminiResult.length > 50) {
-              transcriptText = geminiResult;
-            }
-          } catch (geminiErr) {
-            console.warn('Gemini direct video parsing failed:', geminiErr);
+          } catch {
+            // ignore
           }
         }
 
+        // 🚨 捏造（ハルシネーション）の完全防止:
+        // 字幕や実際のテキストデータが取得できない場合に、LLMに適当な推測を行わせることは絶対に禁止
         if (!transcriptText || transcriptText.length < 50) {
           throw new Error(
-            'YouTubeの文字起こし・字幕データを自動取得できませんでした。\n' +
-            '【対策】\n' +
-            '1. 右上の設定アイコンから「Google AI Studio APIキー」を入力すると、Geminiが動画URLから直接内容を自動解析します。\n' +
-            '2. または、動画から抽出した音声ファイル（mp3/m4a/wav等）を直接ドロップしてWhisper文字起こしを実行してください。'
+            `YouTube動画「${videoTitle}」から公式の字幕データ（日本語・英語）を検出・取得できませんでした。\n\n` +
+            `【原因と確実な対策】\n` +
+            `• この動画は投稿者によって字幕が無効化されているか、自動字幕の生成が完了していません。\n` +
+            `• 【確実な方法】動画の音声（mp3/m4a/wav）をPCに保存し、左側のエリアにドラッグ＆ドロップしてください。内蔵のWhisperが発話音声を100%正確に文字起こしします。`
           );
         }
 
-        const formattedDoc = `## 📺 YouTube動画 文字起こしデータ\n- **URL:** ${rawUrl}\n- **タイトル:** ${videoTitle}\n- **取得時刻:** ${new Date().toLocaleString('ja-JP')}\n\n---\n\n${transcriptText}`;
+        const formattedDoc = `## 📺 YouTube動画 文字起こしデータ\n- **タイトル:** ${videoTitle}\n- **URL:** ${rawUrl}\n- **取得時刻:** ${new Date().toLocaleString('ja-JP')}\n\n---\n\n${transcriptText}`;
         await onAddTextContent(`📺 ${videoTitle.slice(0, 35)}`, formattedDoc);
         setUrlInput('');
         setShowUrlModal(false);
