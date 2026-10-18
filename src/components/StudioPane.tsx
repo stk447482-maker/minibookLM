@@ -19,7 +19,8 @@ import {
   RotateCcw,
   Edit3,
   Check,
-  X
+  X,
+  LayoutGrid
 } from 'lucide-react';
 import { marked } from 'marked';
 import { StudioTab, StudioArtifact, ModelConfig } from '../types/index.ts';
@@ -28,6 +29,7 @@ import { SlideViewer } from './studio/SlideViewer.tsx';
 import { PodcastPlayer } from './studio/PodcastPlayer.tsx';
 import { Graph3DViewer } from './studio/Graph3DViewer.tsx';
 import { FaqViewer } from './studio/FaqViewer.tsx';
+import { QuizFlashcardViewer } from './studio/QuizFlashcardViewer.tsx';
 
 interface StudioPaneProps {
   config?: ModelConfig;
@@ -67,6 +69,8 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     { id: 'study_report', label: '詳細レポート', desc: '数値分析・課題・解決策を網羅した調査書', icon: <BookOpen className="w-3.5 h-3.5" /> },
     { id: 'faq', label: 'FAQ想定問答', desc: '具体的仕様・例外規定を突いた実践的Q&A', icon: <HelpCircle className="w-3.5 h-3.5" /> },
     { id: 'learning_guide', label: '学習ガイド', desc: '概念用語集・ロードマップ・理解度クイズ', icon: <Sparkles className="w-3.5 h-3.5" /> },
+    { id: 'quiz', label: '復習クイズ＆単語帳', desc: '4択理解度テスト＆暗記フラッシュカード', icon: <HelpCircle className="w-3.5 h-3.5 text-emerald-400" /> },
+    { id: 'matrix', label: '比較マトリクス表', desc: '複数ドキュメントの項目別横断比較表', icon: <LayoutGrid className="w-3.5 h-3.5 text-cyan-400" /> },
     { id: 'slide', label: 'Marpスライド', desc: 'プレゼン用スライド（ページ送り対応）', icon: <Presentation className="w-3.5 h-3.5" /> },
     { id: 'mindmap', label: 'マインドマップ', desc: '階層概念図（Mermaidダイアグラム）', icon: <GitBranch className="w-3.5 h-3.5" /> },
     { id: 'flowchart', label: 'フローチャート', desc: '業務・判断プロセスのフロー図', icon: <GitFork className="w-3.5 h-3.5" /> },
@@ -596,6 +600,8 @@ ${currentArtifact.content}
                 <PodcastPlayer script={currentArtifact.content} config={config} />
               ) : activeTab === 'faq' ? (
                 <FaqViewer content={currentArtifact.content} />
+              ) : activeTab === 'quiz' ? (
+                <QuizFlashcardViewer content={currentArtifact.content} />
               ) : (
                 <div
                   className="prose prose-invert prose-sm max-w-none text-xs leading-relaxed"

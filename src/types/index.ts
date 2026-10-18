@@ -97,6 +97,8 @@ export type StudioTab =
   | 'study_report'
   | 'faq'
   | 'learning_guide'
+  | 'quiz'
+  | 'matrix'
   | 'slide'
   | 'mindmap'
   | 'flowchart'

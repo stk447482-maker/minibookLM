@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, Sparkles, ChevronDown, ChevronUp, FileText, Zap, PlusCircle, Trash2, RotateCcw } from 'lucide-react';
+import { Send, Bot, User, Sparkles, ChevronDown, ChevronUp, FileText, Zap, PlusCircle, Trash2, RotateCcw, Mic, MicOff, Volume2 } from 'lucide-react';
 import { marked } from 'marked';
 import { ChatMessage } from '../types/index.ts';
 
@@ -24,15 +24,83 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 }) => {
   const [input, setInput] = useState('');
   const [expandedSources, setExpandedSources] = useState<Record<string, boolean>>({});
+  const [isListening, setIsListening] = useState(false);
+  const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
+  const recognitionRef = useRef<any>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isGenerating, statusMessage]);
 
+  // 音声入力 (STT: Web Speech Recognition API)
+  const toggleListening = () => {
+    if (isListening) {
+      if (recognitionRef.current) recognitionRef.current.stop();
+      setIsListening(false);
+      return;
+    }
+
+    const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRec) {
+      alert('お使いのブラウザは音声入力 (Web Speech API) に対応していません。Chrome / Edge / Safari等をお試しください。');
+      return;
+    }
+
+    try {
+      const recognition = new SpeechRec();
+      recognition.lang = 'ja-JP';
+      recognition.continuous = false;
+      recognition.interimResults = true;
+
+      recognition.onstart = () => setIsListening(true);
+      recognition.onresult = (e: any) => {
+        const transcript = Array.from(e.results)
+          .map((result: any) => result[0].transcript)
+          .join('');
+        setInput(prev => (prev ? prev + ' ' : '') + transcript);
+      };
+      recognition.onerror = () => setIsListening(false);
+      recognition.onend = () => setIsListening(false);
+
+      recognitionRef.current = recognition;
+      recognition.start();
+    } catch {
+      setIsListening(false);
+    }
+  };
+
+  // 音声読み上げ (TTS: SpeechSynthesis)
+  const handleSpeak = (msgId: string, text: string) => {
+    if (!('speechSynthesis' in window)) return;
+
+    if (speakingMsgId === msgId) {
+      window.speechSynthesis.cancel();
+      setSpeakingMsgId(null);
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+    // マークダウン記法等を除去
+    const cleanText = text.replace(/#|\*|`|\[.*?\]\(.*?\)|<.*?>/g, '').trim();
+    const utterance = new SpeechSynthesisUtterance(cleanText);
+    utterance.lang = 'ja-JP';
+    utterance.rate = 1.05;
+
+    utterance.onend = () => setSpeakingMsgId(null);
+    utterance.onerror = () => setSpeakingMsgId(null);
+
+    setSpeakingMsgId(msgId);
+    window.speechSynthesis.speak(utterance);
+  };
+
   const handleSubmit = (e: React.FormEvent, isDirectRAG: boolean = false) => {
     e.preventDefault();
     if (!input.trim() || isGenerating) return;
+    if (isListening && recognitionRef.current) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+    }
     onSendMessage(input.trim(), isDirectRAG);
     setInput('');
   };
@@ -159,14 +227,29 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                 {/* アクションフッター (ソース追加・削除) */}
                 {msg.role === 'assistant' && !msg.isStreaming && (
                   <div className="mt-3 pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-500">
-                    <button
-                      onClick={() => onAddToSource(`回答メモ_${new Date().toLocaleTimeString()}`, msg.content)}
-                      className="flex items-center space-x-1 hover:text-indigo-400 transition-colors"
-                      title="この回答内容を新しいソース（ドキュメント）として保存・登録します"
-                    >
-                      <PlusCircle className="w-3.5 h-3.5" />
-                      <span>ソースに追加</span>
-                    </button>
+                    <div className="flex items-center space-x-3">
+                      <button
+                        onClick={() => onAddToSource(`回答メモ_${new Date().toLocaleTimeString()}`, msg.content)}
+                        className="flex items-center space-x-1 hover:text-indigo-400 transition-colors"
+                        title="この回答内容を新しいソース（ドキュメント）として保存・登録します"
+                      >
+                        <PlusCircle className="w-3.5 h-3.5" />
+                        <span>ソースに追加</span>
+                      </button>
+
+                      <button
+                        onClick={() => handleSpeak(msg.id, msg.content)}
+                        className={`flex items-center space-x-1 transition-colors ${
+                          speakingMsgId === msg.id
+                            ? 'text-purple-400 font-bold animate-pulse'
+                            : 'hover:text-purple-300'
+                        }`}
+                        title="音声で回答を読み上げます"
+                      >
+                        <Volume2 className="w-3.5 h-3.5" />
+                        <span>{speakingMsgId === msg.id ? '停止' : '読み上げ'}</span>
+                      </button>
+                    </div>
 
                     <button
                       onClick={() => onDeleteMessage(msg.id)}
@@ -205,10 +288,28 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="選択したドキュメントについて質問する..."
+            placeholder={isListening ? "🎙️ 音声を聴き取っています... 話してください" : "選択したドキュメントについて質問する..."}
             disabled={isGenerating}
-            className="flex-1 bg-slate-800/90 border border-slate-700/80 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all disabled:opacity-50"
+            className={`flex-1 bg-slate-800/90 border rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-1 transition-all disabled:opacity-50 ${
+              isListening
+                ? 'border-rose-500 ring-rose-500/50 bg-rose-950/20 text-rose-200 placeholder-rose-400'
+                : 'border-slate-700/80 focus:border-indigo-500 focus:ring-indigo-500'
+            }`}
           />
+
+          <button
+            type="button"
+            onClick={toggleListening}
+            disabled={isGenerating}
+            className={`p-3 rounded-xl border transition-all shrink-0 flex items-center justify-center ${
+              isListening
+                ? 'bg-rose-600 text-white border-rose-500 animate-pulse shadow-lg shadow-rose-600/30'
+                : 'bg-slate-800 hover:bg-slate-750 text-slate-400 hover:text-slate-200 border-slate-700'
+            }`}
+            title={isListening ? "音声入力を終了" : "音声で話しかける (ハンズフリー音声チャット)"}
+          >
+            {isListening ? <MicOff className="w-4 h-4 text-white" /> : <Mic className="w-4 h-4" />}
+          </button>
 
           <button
             type="button"
