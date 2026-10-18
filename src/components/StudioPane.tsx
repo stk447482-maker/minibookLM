@@ -371,6 +371,39 @@ ${currentArtifact.content}
           )}
         </div>
 
+        {/* 🎙️ ポッドキャスト専用: 会話スタイル・ペルソナ選択ピル */}
+        {activeTab === 'podcast' && (
+          <div className="flex items-center space-x-1.5 overflow-x-auto pb-1 text-[11px]">
+            <span className="text-slate-400 font-bold shrink-0 text-[10px]">🎙️ スタイル:</span>
+            {[
+              { id: 'standard', label: '標準解説', desc: '丁寧な掛け合い・NotebookLMスタイル' },
+              { id: 'lecture', label: '熱血講義', desc: '情熱的な指導役 × 好奇心旺盛な学習者' },
+              { id: 'radio', label: '深夜ラジオ', desc: '落ち着いたトーン、本音トーク' },
+              { id: 'comedy', label: '漫才風', desc: 'テンポ良いボケ＆ツッコミで理解' }
+            ].map(p => {
+              const isSelected = (!customPrompt && p.id === 'standard') || customPrompt.includes(`[スタイル: ${p.label}]`);
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => {
+                    const cleanPrompt = customPrompt.replace(/\[スタイル: [^\]]+\]\s*/g, '').trim();
+                    setCustomPrompt(`[スタイル: ${p.label}] ${cleanPrompt}`.trim());
+                  }}
+                  className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold shrink-0 transition-all ${
+                    isSelected
+                      ? 'bg-indigo-600 border-indigo-400 text-white shadow-sm'
+                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                  }`}
+                  title={p.desc}
+                >
+                  {p.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         {/* 💡 自由な追加指示入力欄 */}
         <form onSubmit={handleGenerateClick} className="relative">
           <input

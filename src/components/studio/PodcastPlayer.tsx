@@ -24,6 +24,27 @@ export const PodcastPlayer: React.FC<PodcastPlayerProps> = ({ script, config }) 
   const [synthesisProgress, setSynthesisProgress] = useState<number>(0);
   const [synthesisStatus, setSynthesisStatus] = useState<string>('');
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [lineTimings, setLineTimings] = useState<{ start: number; end: number }[]>([]);
+  const lineContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // currentLineIndex が変わったら該当の行カードへ自動スムーススクロール
+  useEffect(() => {
+    if (isPlaying && lineContainerRef.current) {
+      const activeEl = lineContainerRef.current.querySelector(`[data-line-index="${currentLineIndex}"]`) as HTMLElement;
+      if (activeEl) {
+        activeEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }
+  }, [currentLineIndex, isPlaying]);
+
+  const handleAudioTimeUpdate = () => {
+    if (!audioRef.current || lineTimings.length === 0) return;
+    const curTime = audioRef.current.currentTime;
+    const foundIdx = lineTimings.findIndex(t => curTime >= t.start && curTime <= t.end);
+    if (foundIdx !== -1 && foundIdx !== currentLineIndex) {
+      setCurrentLineIndex(foundIdx);
+    }
+  };
 
   // 会話行の厳密なパース（アレックス / サクラ / ホスト / ゲスト等の柔軟判定）
   const parsedLines: DialogueLine[] = React.useMemo(() => {
@@ -300,6 +321,22 @@ export const PodcastPlayer: React.FC<PodcastPlayerProps> = ({ script, config }) 
         }
       }
 
+      const timings: { start: number; end: number }[] = [];
+      let currentSampleCursor = 0;
+
+      for (let i = 0; i < parsedLines.length; i++) {
+        // 各行は [lineBuffer, pauseBuffer] の順で格納されているため index は i * 2
+        const lineBuf = audioBuffers[i * 2];
+        const pauseBuf = audioBuffers[i * 2 + 1];
+        if (lineBuf) {
+          const startSec = currentSampleCursor / sampleRate;
+          const endSec = (currentSampleCursor + lineBuf.length) / sampleRate;
+          timings.push({ start: startSec, end: endSec });
+          currentSampleCursor += lineBuf.length + (pauseBuf ? pauseBuf.length : 0);
+        }
+      }
+      setLineTimings(timings);
+
       setSynthesisStatus('オーディオトラックを結合・マスタリング中...');
 
       const totalLen = audioBuffers.reduce((acc, c) => acc + c.length, 0);
@@ -485,7 +522,11 @@ export const PodcastPlayer: React.FC<PodcastPlayerProps> = ({ script, config }) 
               src={synthesizedAudioUrl}
               onPlay={() => setIsPlaying(true)}
               onPause={() => setIsPlaying(false)}
-              onEnded={() => setIsPlaying(false)}
+              onEnded={() => {
+                setIsPlaying(false);
+                setCurrentLineIndex(0);
+              }}
+              onTimeUpdate={handleAudioTimeUpdate}
               controls
               className="w-full h-8 outline-none"
             />
@@ -493,14 +534,18 @@ export const PodcastPlayer: React.FC<PodcastPlayerProps> = ({ script, config }) 
         )}
       </div>
 
-      {/* スクリプト会話タイムライン表示 */}
-      <div className="bg-slate-950/80 rounded-xl p-3 border border-slate-800 text-xs leading-relaxed max-h-72 overflow-y-auto space-y-2.5">
+      {/* スクリプト会話タイムライン表示（カラオケ風自動追従） */}
+      <div 
+        ref={lineContainerRef}
+        className="bg-slate-950/80 rounded-xl p-3 border border-slate-800 text-xs leading-relaxed max-h-72 overflow-y-auto space-y-2.5 scroll-smooth"
+      >
         {parsedLines.length === 0 ? (
           <div className="prose prose-invert prose-sm" dangerouslySetInnerHTML={{ __html: marked.parse(script) as string }} />
         ) : (
           parsedLines.map((line, idx) => (
             <div
               key={idx}
+              data-line-index={idx}
               className={`p-2.5 rounded-xl border transition-all ${
                 idx === currentLineIndex && isPlaying
                   ? 'bg-indigo-950/60 border-indigo-500/60 shadow-md ring-1 ring-indigo-500/30'

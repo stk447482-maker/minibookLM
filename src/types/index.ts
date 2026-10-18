@@ -32,7 +32,10 @@ export interface ModelConfig {
   whisperServerEndpoint?: string;
   podcastTtsEngine?: 'voicevox' | 'google' | 'kokoro' | 'webspeech';
   podcastSpeakingRate?: number;
+  podcastPersona?: 'standard' | 'lecture' | 'radio' | 'comedy';
 }
+
+export type PodcastPersona = 'standard' | 'lecture' | 'radio' | 'comedy';
 
 
 export interface Project {
