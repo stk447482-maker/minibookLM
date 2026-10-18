@@ -118,7 +118,7 @@ export const Header: React.FC<HeaderProps> = ({
           ) : config.mode === 'cloud-gemini' ? (
             <>
               <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-              <span>☁️ Gemini 1.5 Flash</span>
+              <span>☁️ Gemini 2.5 Flash</span>
             </>
           ) : (
             <>

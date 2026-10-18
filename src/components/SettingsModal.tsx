@@ -376,7 +376,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <div>
                   <h3 className="text-xs font-bold text-slate-200">☁️ Google Gemini API (クラウド高速連携)</h3>
                   <p className="text-[11px] text-slate-400">
-                    Gemini 1.5 Flash / 2.0 Flash を直接ストリーミング（無料枠利用可）
+                    Gemini 2.5 Flash / 2.0 Flash を直接ストリーミング（無料枠利用可）
                   </p>
                 </div>
               </div>

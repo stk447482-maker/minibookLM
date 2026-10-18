@@ -36,70 +36,100 @@ class LLMService {
     temperature: number = 0.3,
     abortSignal?: AbortSignal
   ): AsyncIterable<string> {
-    const targetModel = modelName.includes('gemini') ? modelName : 'gemini-1.5-flash';
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:streamGenerateContent?alt=sse&key=${apiKey}`;
+    const cleanApiKey = apiKey.trim();
+    const candidateModels = [
+      modelName?.includes('gemini') ? modelName : 'gemini-2.5-flash',
+      'gemini-2.5-flash',
+      'gemini-2.0-flash',
+      'gemini-2.5-flash-lite'
+    ];
+    // 重複除去
+    const modelsToTry = Array.from(new Set(candidateModels));
 
-    const contents: any[] = [];
-    let systemInstruction: any = null;
+    let lastError: Error | null = null;
+    for (const targetModel of modelsToTry) {
+      if (abortSignal?.aborted) break;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:streamGenerateContent?alt=sse&key=${cleanApiKey}`;
 
-    for (const m of messages) {
-      if (m.role === 'system') {
-        systemInstruction = { parts: [{ text: m.content }] };
-      } else if (m.role === 'user') {
-        contents.push({ role: 'user', parts: [{ text: m.content }] });
-      } else if (m.role === 'assistant') {
-        contents.push({ role: 'model', parts: [{ text: m.content }] });
-      }
-    }
+      const contents: any[] = [];
+      let systemInstruction: any = null;
 
-    const payload: any = {
-      contents,
-      generationConfig: {
-        temperature
-      }
-    };
-    if (systemInstruction) {
-      payload.systemInstruction = systemInstruction;
-    }
-
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: abortSignal
-    });
-
-    if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(`Gemini APIエラー (${res.status}): ${errText}`);
-    }
-
-    const reader = res.body?.getReader();
-    if (!reader) throw new Error('ReadableStreamを利用できません');
-
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const dataStr = line.slice(6).trim();
-          if (!dataStr) continue;
-          try {
-            const data = JSON.parse(dataStr);
-            const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-            if (text) yield text;
-          } catch {}
+      for (const m of messages) {
+        if (m.role === 'system') {
+          systemInstruction = { parts: [{ text: m.content }] };
+        } else if (m.role === 'user') {
+          contents.push({ role: 'user', parts: [{ text: m.content }] });
+        } else if (m.role === 'assistant') {
+          contents.push({ role: 'model', parts: [{ text: m.content }] });
         }
       }
+
+      const payload: any = {
+        contents,
+        generationConfig: {
+          temperature
+        }
+      };
+      if (systemInstruction) {
+        payload.systemInstruction = systemInstruction;
+      }
+
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          signal: abortSignal
+        });
+
+        if (res.status === 404) {
+          // モデル廃止・非対応の場合は次の候補へフォールバック
+          continue;
+        }
+
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(`Gemini APIエラー (${res.status}): ${errText}`);
+        }
+
+        const reader = res.body?.getReader();
+        if (!reader) throw new Error('ReadableStreamを利用できません');
+
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const dataStr = line.slice(6).trim();
+              if (!dataStr) continue;
+              try {
+                const data = JSON.parse(dataStr);
+                const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (text) yield text;
+              } catch {}
+            }
+          }
+        }
+        return; // 成功した場合は終了
+      } catch (err: any) {
+        if (err.message && err.message.includes('404')) {
+          continue;
+        }
+        lastError = err;
+        break;
+      }
     }
+
+    if (lastError) throw lastError;
+    throw new Error('利用可能なGeminiモデルが見つかりませんでした。Google AI Studioで有効なAPIキーをご確認ください。');
   }
 
   // 2. デスクトップ API (Ollama / server.py) へのストリーミング
@@ -503,9 +533,15 @@ ${timeHint}`;
 
     // 原音ファイルの MIME タイプを正確に反映（mp3, m4a, wav等）
     const effectiveMimeType = customMimeType || audioBlob.type || 'audio/wav';
+    const cleanApiKey = apiKey.trim();
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
-    const payload = {
+    const candidateAudioModels = ['gemini-2.5-flash', 'gemini-2.0-flash'];
+    let lastErr: Error | null = null;
+
+    for (const model of candidateAudioModels) {
+      if (abortSignal?.aborted) break;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${cleanApiKey}`;
+      const payload = {
       contents: [
         {
           parts: [
@@ -526,21 +562,35 @@ ${timeHint}`;
       }
     };
 
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: abortSignal
-    });
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          signal: abortSignal
+        });
 
-    if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(`Gemini Audio APIエラー (${res.status}): ${errText}`);
+        if (res.status === 404) {
+          continue;
+        }
+
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(`Gemini Audio APIエラー (${res.status}): ${errText}`);
+        }
+
+        const data = await res.json();
+        const resultText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        return resultText.trim();
+      } catch (err: any) {
+        if (err.message && err.message.includes('404')) continue;
+        lastErr = err;
+        break;
+      }
     }
 
-    const data = await res.json();
-    const resultText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    return resultText.trim();
+    if (lastErr) throw lastErr;
+    throw new Error('音声文字起こし用Geminiモデルが見つかりませんでした。有効なAPIキーをご確認ください。');
   }
 
   // 4. Google Cloud / Gemini ニューラル高音質音声合成 (Neural2-C: 男声ホスト, Neural2-B: 女声ゲスト)
