@@ -54,17 +54,27 @@ class LLMService {
       if (abortSignal?.aborted) break;
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:streamGenerateContent?alt=sse&key=${cleanApiKey}`;
 
-      const contents: any[] = [];
+      // 🔄 ロール交差ルール（user ⇔ model）の厳格な正規化（連続する同ロールを自動統合）
+      const contents: { role: 'user' | 'model'; parts: { text: string }[] }[] = [];
       let systemInstruction: any = null;
 
       for (const m of messages) {
         if (m.role === 'system') {
           systemInstruction = { parts: [{ text: m.content }] };
-        } else if (m.role === 'user') {
-          contents.push({ role: 'user', parts: [{ text: m.content }] });
-        } else if (m.role === 'assistant') {
-          contents.push({ role: 'model', parts: [{ text: m.content }] });
+        } else {
+          const role = m.role === 'assistant' ? 'model' : 'user';
+          const lastTurn = contents[contents.length - 1];
+          if (lastTurn && lastTurn.role === role) {
+            lastTurn.parts.push({ text: m.content });
+          } else {
+            contents.push({ role, parts: [{ text: m.content }] });
+          }
         }
+      }
+
+      // 最初のターンが model の場合は先頭に空の user ターンを追加
+      if (contents.length > 0 && contents[0].role === 'model') {
+        contents.unshift({ role: 'user', parts: [{ text: 'Hello' }] });
       }
 
       const payload: any = {
@@ -77,6 +87,7 @@ class LLMService {
         payload.systemInstruction = systemInstruction;
       }
 
+      // 1. まずストリーミング (streamGenerateContent) を試行
       try {
         const res = await fetch(url, {
           method: 'POST',
@@ -86,7 +97,6 @@ class LLMService {
         });
 
         if (res.status === 404) {
-          // モデル廃止・非対応の場合は次の候補へフォールバック
           continue;
         }
 
@@ -121,13 +131,44 @@ class LLMService {
             }
           }
         }
-        return; // 成功した場合は終了
+        return; // ストリーミング成功
       } catch (err: any) {
         if (err.message && err.message.includes('404')) {
           continue;
         }
+
+        // 2. ストリーミングがネットワーク/CORS等で弾かれた場合、通常生成 (generateContent) で即座に代替フォールバック試行
+        try {
+          const syncUrl = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${cleanApiKey}`;
+          const syncRes = await fetch(syncUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            signal: abortSignal
+          });
+
+          if (syncRes.status === 404) {
+            continue;
+          }
+
+          if (syncRes.ok) {
+            const syncData = await syncRes.json();
+            const text = syncData.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (text) {
+              yield text;
+              return; // 通常生成成功
+            }
+          } else {
+            const errBody = await syncRes.text();
+            lastError = new Error(`Google API応答エラー (${syncRes.status}): ${errBody}`);
+            break;
+          }
+        } catch {
+          // 通常生成もfetch失敗した場合はブラウザ/ネットワーク制限エラーを案内
+        }
+
         if (err.name === 'TypeError' && err.message && err.message.includes('fetch')) {
-          lastError = new Error(`Google API通信エラー (${err.message}): ブラウザからの直接通信が制限されているか、ネットワーク/広告ブロッカーでブロックされた可能性があります。APIキーまたは接続環境をご確認いただくか、設定で「⚡ ブラウザ内 WebGPU」または「💻 デスクトップ」モードをお試しください。`);
+          lastError = new Error(`Google API通信エラー (Failed to fetch): ブラウザや広告ブロッカー（AdBlock/Brave等）によって Google API への通信が遮断されています。\n【対策】\n1. 広告ブロッカー・シールドを一時OFFにする\n2. Google AI Studio で API キーの「HTTPリファラー制限」に https://mininotebooklm.web.app/* を許可する\n3. 完全ローカル・端末内で動く「⚡ ブラウザ内 WebGPU」または「💻 デスクトップ」モードに切り替える`);
         } else {
           lastError = err;
         }
