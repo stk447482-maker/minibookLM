@@ -15,7 +15,9 @@ import {
   Eye,
   ArrowRightLeft,
   Copy,
-  Sparkles
+  Sparkles,
+  Globe,
+  Plus
 } from 'lucide-react';
 import { DocumentSource, Project } from '../types/index.ts';
 
@@ -27,6 +29,7 @@ interface DocumentsPaneProps {
   onDeleteProject: (id: string) => void;
   onExportProject: (id: string) => void;
   onImportProject: (file: File) => void;
+  onAddTextContent?: (title: string, content: string) => Promise<void>;
   documents: DocumentSource[];
   onUpload: (files: FileList) => void;
   onToggleDoc: (id: string) => void;
@@ -53,6 +56,7 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
   onDeleteProject,
   onExportProject,
   onImportProject,
+  onAddTextContent,
   documents,
   onUpload,
   onToggleDoc,
@@ -79,6 +83,12 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
   const [transferMode, setTransferMode] = useState<'copy' | 'move'>('copy');
   const [isTransferring, setIsTransferring] = useState(false);
   const [filterTab, setFilterTab] = useState<'all' | 'files' | 'brain'>('all');
+
+  // Web記事 & YouTube インポートモーダル
+  const [showUrlModal, setShowUrlModal] = useState(false);
+  const [urlInput, setUrlInput] = useState('');
+  const [isFetchingUrl, setIsFetchingUrl] = useState(false);
+  const [urlFetchError, setUrlFetchError] = useState<string | null>(null);
 
   const enabledCount = documents.filter(d => d.enabled).length;
   const isAllSelected = documents.length > 0 && enabledCount === documents.length;
@@ -121,6 +131,99 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
       alert('移動/コピーに失敗しました');
     } finally {
       setIsTransferring(false);
+    }
+  };
+
+  // 🌐 Web記事 / YouTube URL の自動インポート処理
+  const handleUrlImport = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const rawUrl = urlInput.trim();
+    if (!rawUrl || isFetchingUrl || !onAddTextContent) return;
+
+    setIsFetchingUrl(true);
+    setUrlFetchError(null);
+
+    try {
+      // 1. YouTube URL 判定 (youtube.com / youtu.be)
+      const ytMatch = rawUrl.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/))([\w-]{11})/);
+      if (ytMatch && ytMatch[1]) {
+        const videoId = ytMatch[1];
+        // 字幕/動画情報の取得
+        let transcriptText = '';
+        let videoTitle = `YouTube (${videoId})`;
+
+        try {
+          // jina.ai reader によるYouTube自動要約・字幕取得プロキシ
+          const jinaUrl = `https://r.jina.ai/https://www.youtube.com/watch?v=${videoId}`;
+          const res = await fetch(jinaUrl, { headers: { 'Accept': 'text/plain' } });
+          if (res.ok) {
+            const markdown = await res.text();
+            // タイトル抽出
+            const titleMatch = markdown.match(/Title:\s*(.+)/);
+            if (titleMatch && titleMatch[1]) videoTitle = titleMatch[1].trim();
+            transcriptText = markdown;
+          }
+        } catch {
+          // fallback
+        }
+
+        if (!transcriptText || transcriptText.length < 50) {
+          throw new Error('YouTubeの文字起こし・字幕データを取得できませんでした。');
+        }
+
+        const formattedDoc = `## 📺 YouTube動画 文字起こしデータ\n- **URL:** ${rawUrl}\n- **タイトル:** ${videoTitle}\n- **取得時刻:** ${new Date().toLocaleString('ja-JP')}\n\n---\n\n${transcriptText}`;
+        await onAddTextContent(`📺 ${videoTitle.slice(0, 35)}`, formattedDoc);
+        setUrlInput('');
+        setShowUrlModal(false);
+        return;
+      }
+
+      // 2. 一般 Web 記事の Clean Reader インポート
+      let webTitle = rawUrl;
+      let cleanContent = '';
+
+      // Jina Reader API (高速・広告除去・Markdown変換) 経由
+      try {
+        const jinaUrl = `https://r.jina.ai/${rawUrl}`;
+        const res = await fetch(jinaUrl, { headers: { 'Accept': 'text/plain' } });
+        if (res.ok) {
+          const md = await res.text();
+          const titleMatch = md.match(/Title:\s*(.+)/);
+          if (titleMatch && titleMatch[1]) webTitle = titleMatch[1].trim();
+          cleanContent = md;
+        }
+      } catch {
+        // 次のフォールバックへ
+      }
+
+      // フォールバック: allorigins プロキシ + DOMParser
+      if (!cleanContent || cleanContent.length < 50) {
+        const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(rawUrl)}`;
+        const res = await fetch(proxyUrl);
+        if (!res.ok) throw new Error('Webページの取得に失敗しました');
+        const json = await res.json();
+        const html = json.contents;
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+        doc.querySelectorAll('script, style, noscript, nav, footer, header, svg, iframe').forEach(el => el.remove());
+        webTitle = doc.title || rawUrl;
+        const bodyText = doc.body ? (doc.body.innerText || doc.body.textContent || '') : '';
+        cleanContent = bodyText.replace(/\n\s*\n+/g, '\n\n').trim();
+      }
+
+      if (!cleanContent || cleanContent.length < 30) {
+        throw new Error('Webページから有効な本文を抽出できませんでした。');
+      }
+
+      const formattedDoc = `## 🌐 Web記事 インポートデータ\n- **タイトル:** ${webTitle}\n- **URL:** ${rawUrl}\n- **取得時刻:** ${new Date().toLocaleString('ja-JP')}\n\n---\n\n${cleanContent}`;
+      await onAddTextContent(`🌐 ${webTitle.slice(0, 35)}`, formattedDoc);
+      setUrlInput('');
+      setShowUrlModal(false);
+    } catch (err: any) {
+      console.error('URL Import error:', err);
+      setUrlFetchError(err.message || 'インポートに失敗しました');
+    } finally {
+      setIsFetchingUrl(false);
     }
   };
 
@@ -332,7 +435,7 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
           ref={fileInputRef}
           onChange={(e) => e.target.files && onUpload(e.target.files)}
           multiple
-          accept=".pdf,.txt,.md,.mp3,.mp4,.wav,.wma,.m4a,.ogg,.webm,.mov"
+          accept=".pdf,.txt,.md,.mp3,.mp4,.wav,.wma,.m4a,.ogg,.webm,.mov,.png,.jpg,.jpeg,.webp,.bmp"
           className="hidden"
         />
         {isProcessing ? (
@@ -364,13 +467,25 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
           <div className="flex flex-col items-center justify-center space-y-1 py-1">
             <FileUp className="w-5 h-5 text-indigo-400" />
             <span className="text-xs font-semibold text-slate-200">
-              PDF / 音声 / 動画 / テキストを追加
+              PDF / 音声 / 動画 / 画像(OCR) / テキスト
             </span>
             <span className="text-[10px] text-slate-500">
-              PDF, MP3, MP4, WMA, M4A, TXT対応
+              PDF, 音声, 動画, 📷画像OCR(PNG/JPG), TXT
             </span>
           </div>
         )}
+      </div>
+
+      {/* 🌐 Web記事 & YouTube 取り込みボタン */}
+      <div className="mt-2">
+        <button
+          type="button"
+          onClick={() => setShowUrlModal(true)}
+          className="w-full py-1.5 px-2.5 bg-slate-800/80 hover:bg-slate-750 border border-slate-700/70 hover:border-indigo-500/50 rounded-xl text-xs font-medium text-slate-300 hover:text-indigo-200 flex items-center justify-center space-x-1.5 transition-all shadow-sm"
+        >
+          <Globe className="w-3.5 h-3.5 text-cyan-400" />
+          <span>Web記事 / YouTube URLを取り込む</span>
+        </button>
       </div>
 
       {/* ドキュメント一覧 */}
@@ -610,6 +725,94 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
                 <span>{transferMode === 'copy' ? 'コピー実行' : '移動実行'}</span>
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🌐 Web記事 & YouTube URL インポートモーダル */}
+      {showUrlModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-2xl w-full max-w-md p-5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center space-x-2">
+                <div className="p-1.5 rounded-lg bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+                  <Globe className="w-4 h-4" />
+                </div>
+                <h3 className="text-sm font-bold text-slate-100">Web記事 / YouTube 取り込み</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowUrlModal(false);
+                  setUrlFetchError(null);
+                }}
+                className="text-slate-400 hover:text-slate-200 text-xs px-2 py-1 rounded-lg hover:bg-slate-800"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleUrlImport} className="space-y-3">
+              <div>
+                <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                  URLを入力:
+                </label>
+                <input
+                  type="url"
+                  required
+                  placeholder="https://example.com/article または https://youtu.be/..."
+                  value={urlInput}
+                  onChange={(e) => setUrlInput(e.target.value)}
+                  disabled={isFetchingUrl}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500"
+                />
+              </div>
+
+              <div className="p-2.5 bg-slate-950/60 rounded-xl border border-slate-800 text-[11px] text-slate-400 space-y-1">
+                <div className="flex items-center space-x-1.5 text-slate-300 font-semibold">
+                  <Sparkles className="w-3 h-3 text-amber-400" />
+                  <span>自動クリーン＆インデックス機能:</span>
+                </div>
+                <ul className="list-disc pl-4 space-y-0.5 text-slate-400 text-[10px]">
+                  <li>Web記事: 広告やナビゲーションを除去し、本文をMarkdown化して即座にRAG索引化。</li>
+                  <li>YouTube: 動画の字幕・文字起こしデータを自動取得し、タイムスタンプ付きで索引化。</li>
+                </ul>
+              </div>
+
+              {urlFetchError && (
+                <div className="p-2 rounded-lg bg-rose-500/10 border border-rose-500/30 text-[11px] text-rose-300">
+                  ⚠️ {urlFetchError}
+                </div>
+              )}
+
+              <div className="flex items-center justify-end space-x-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowUrlModal(false)}
+                  disabled={isFetchingUrl}
+                  className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 rounded-lg transition-colors"
+                >
+                  キャンセル
+                </button>
+                <button
+                  type="submit"
+                  disabled={isFetchingUrl || !urlInput.trim()}
+                  className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white text-xs font-semibold rounded-xl shadow-lg shadow-cyan-900/40 transition-all flex items-center space-x-1.5"
+                >
+                  {isFetchingUrl ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>解析＆取り込み中...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>ドキュメントに追加</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

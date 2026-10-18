@@ -1186,6 +1186,7 @@ ${fullContext}`;
             onDeleteProject={handleDeleteProject}
             onExportProject={handleExportProject}
             onImportProject={handleImportProject}
+            onAddTextContent={handleAddContentToSource}
             documents={documents}
             onUpload={handleUpload}
             onToggleDoc={handleToggleDoc}

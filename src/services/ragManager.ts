@@ -672,6 +672,21 @@ ${combinedRaw.slice(0, 3000)}`;
       content = await this.parseAudioOrVideo(file, (status, p) => {
         if (p !== undefined) onProgress?.(p, status);
       }, options);
+    } else if (ext.endsWith('.png') || ext.endsWith('.jpg') || ext.endsWith('.jpeg') || ext.endsWith('.webp') || ext.endsWith('.bmp')) {
+      docType = 'text';
+      onProgress?.(30, '🖼️ 画像ファイル参照 OCR解析中 (Google Gemini Vision)...');
+      const apiKey = options?.cloudApiKey || options?.modelConfig?.cloudApiKey;
+      if (!apiKey) {
+        throw new Error('画像OCRにはGemini APIキーが必要です。右上の設定パネルでAPIキーを入力してください。');
+      }
+      const ocrMarkdown = await llmService.extractTextFromImageWithGemini(
+        apiKey,
+        file,
+        options?.abortSignal,
+        file.type
+      );
+      content = `## 📷 画像参照 OCR解析テキスト (${file.name})\n\n${ocrMarkdown}`;
+      onProgress?.(80, 'OCR解析完了。インデックス作成中...');
     } else {
       content = await file.text();
     }

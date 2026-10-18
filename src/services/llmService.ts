@@ -664,6 +664,88 @@ ${timeHint}`;
     throw new Error('音声文字起こし用Geminiモデルが見つかりませんでした。有効なAPIキーをご確認ください。');
   }
 
+  // 3-B. Google Gemini による画像OCR・テキスト抽出（ファイル参照OCR）
+  public async extractTextFromImageWithGemini(
+    apiKey: string,
+    imageBlob: Blob | File,
+    abortSignal?: AbortSignal,
+    customMimeType?: string
+  ): Promise<string> {
+    const arrayBuffer = await imageBlob.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuffer);
+    let binary = '';
+    const len = bytes.byteLength;
+    for (let i = 0; i < len; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    const base64Data = btoa(binary);
+
+    const prompt = `あなたは極めて高精度な画像OCR・ドキュメント復元AIです。
+画像内の印刷文字、手書き文字、表、図表内のテキスト、数式を忠実に抽出し、読みやすいMarkdown形式で出力してください。
+
+【厳格ルール】
+1. 見出し、リスト、テーブル構造を正確にMarkdown（#, -, |, 等）で再現してください。
+2. 表がある場合はMarkdownテーブル形式で転記してください。
+3. 誤読や推測での内容追加は行わず、画像に記載されている内容のみを忠実に文字起こししてください。
+4. 前置きや解説テキストは一切省き、抽出したMarkdown本文のみを出力してください。`;
+
+    const effectiveMimeType = customMimeType || imageBlob.type || 'image/png';
+    const cleanApiKey = apiKey.trim();
+    const candidateVisionModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+    let lastErr: Error | null = null;
+
+    for (const model of candidateVisionModels) {
+      if (abortSignal?.aborted) break;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${cleanApiKey}`;
+      const payload = {
+        contents: [
+          {
+            parts: [
+              {
+                inline_data: {
+                  mime_type: effectiveMimeType,
+                  data: base64Data
+                }
+              },
+              {
+                text: prompt
+              }
+            ]
+          }
+        ],
+        generationConfig: {
+          temperature: 0.1
+        }
+      };
+
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          signal: abortSignal
+        });
+
+        if (res.status === 404) continue;
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(`Gemini Vision OCR APIエラー (${res.status}): ${errText}`);
+        }
+
+        const data = await res.json();
+        const resultText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        return resultText.trim();
+      } catch (err: any) {
+        if (err.message && err.message.includes('404')) continue;
+        lastErr = err;
+        break;
+      }
+    }
+
+    if (lastErr) throw lastErr;
+    throw new Error('画像OCR用Geminiモデルが見つかりませんでした。APIキーをご確認ください。');
+  }
+
   // 4. Google Cloud / Gemini ニューラル高音質音声合成 (Neural2-C: 男声ホスト, Neural2-B: 女声ゲスト)
   public async synthesizeSpeechWithGoogle(
     apiKey: string,
