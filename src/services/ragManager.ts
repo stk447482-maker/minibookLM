@@ -7,6 +7,7 @@ import { DocumentChunk, DocumentSource, SourceReference, FactSkeleton, ModelConf
 import { dbService } from './db.ts';
 import { decodeAudioTo16kMono, createWavBlobFromFloat32 } from './audioDecoder.ts';
 import { llmService } from './llmService.ts';
+import { OCRService } from './ocrService.ts';
 
 const REFINER_SYSTEM_PROMPT = `あなたは極めて厳格で優秀な音声認識校正・文脈復元AIです。
 GeminiやNotebookLMのように、音声認識（Whisper）が出力した生テキストの同音異義誤り、助詞の脱落、句読点の欠損を前後の文脈から修復してください。
@@ -674,19 +675,16 @@ ${combinedRaw.slice(0, 3000)}`;
       }, options);
     } else if (ext.endsWith('.png') || ext.endsWith('.jpg') || ext.endsWith('.jpeg') || ext.endsWith('.webp') || ext.endsWith('.bmp')) {
       docType = 'text';
-      onProgress?.(30, '🖼️ 画像ファイル参照 OCR解析中 (Google Gemini Vision)...');
-      const apiKey = options?.cloudApiKey || options?.modelConfig?.cloudApiKey;
-      if (!apiKey) {
-        throw new Error('画像OCRにはGemini APIキーが必要です。右上の設定パネルでAPIキーを入力してください。');
-      }
-      const ocrMarkdown = await llmService.extractTextFromImageWithGemini(
-        apiKey,
+      content = await OCRService.recognizeText(
         file,
-        options?.abortSignal,
-        file.type
+        (percent, status) => {
+          onProgress?.(percent, status);
+        },
+        {
+          cloudApiKey: options?.cloudApiKey || options?.modelConfig?.cloudApiKey,
+          abortSignal: options?.abortSignal
+        }
       );
-      content = `## 📷 画像参照 OCR解析テキスト (${file.name})\n\n${ocrMarkdown}`;
-      onProgress?.(80, 'OCR解析完了。インデックス作成中...');
     } else {
       content = await file.text();
     }

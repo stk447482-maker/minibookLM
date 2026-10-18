@@ -368,9 +368,14 @@ ${currentArtifact.content}
       {/* ⚡ 生成アクションエリア */}
       <div className="space-y-2 shrink-0 bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/80">
         {enabledDocsCount === 0 && (
-          <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg px-2.5 py-1.5 text-[11px] text-amber-300 flex items-center justify-between">
-            <span>👈 左の資料一覧でチェックを入れてください</span>
-            <span className="font-mono text-[10px] bg-amber-500/20 px-1 rounded">0件選択</span>
+          <div className="bg-gradient-to-r from-amber-950/90 via-slate-900 to-amber-950/90 border border-amber-500/80 rounded-xl px-3 py-2 text-xs flex items-center justify-between shadow-md shadow-amber-950/40">
+            <span className="font-bold text-amber-50 flex items-center space-x-1.5">
+              <span className="text-base">👈</span>
+              <span>左の資料一覧でチェックを入れてください</span>
+            </span>
+            <span className="font-mono text-[11px] font-black bg-amber-400 text-slate-950 px-2.5 py-0.5 rounded-full shadow-sm">
+              0件選択中
+            </span>
           </div>
         )}
 

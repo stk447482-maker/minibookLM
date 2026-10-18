@@ -20,6 +20,7 @@ import {
   Plus
 } from 'lucide-react';
 import { DocumentSource, Project } from '../types/index.ts';
+import { llmService } from '../services/llmService.ts';
 
 interface DocumentsPaneProps {
   projects: Project[];
@@ -46,6 +47,7 @@ interface DocumentsPaneProps {
   onCancelUpload?: () => void;
   audioEngine?: 'auto' | 'gemini' | 'whisper-small' | 'whisper-large-v3' | 'kotoba-whisper' | 'native-large-v3' | 'native-kotoba' | 'whisper-local';
   onChangeAudioEngine?: (engine: 'auto' | 'gemini' | 'whisper-small' | 'whisper-large-v3' | 'kotoba-whisper' | 'native-large-v3' | 'native-kotoba' | 'whisper-local') => void;
+  cloudApiKey?: string;
 }
 
 export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
@@ -72,7 +74,8 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
   processStatusText,
   onCancelUpload,
   audioEngine,
-  onChangeAudioEngine
+  onChangeAudioEngine,
+  cloudApiKey
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -148,27 +151,102 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
       const ytMatch = rawUrl.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/))([\w-]{11})/);
       if (ytMatch && ytMatch[1]) {
         const videoId = ytMatch[1];
-        // 字幕/動画情報の取得
         let transcriptText = '';
         let videoTitle = `YouTube (${videoId})`;
 
+        // 方式 A: Jina Reader API 経由
         try {
-          // jina.ai reader によるYouTube自動要約・字幕取得プロキシ
           const jinaUrl = `https://r.jina.ai/https://www.youtube.com/watch?v=${videoId}`;
           const res = await fetch(jinaUrl, { headers: { 'Accept': 'text/plain' } });
           if (res.ok) {
             const markdown = await res.text();
-            // タイトル抽出
-            const titleMatch = markdown.match(/Title:\s*(.+)/);
-            if (titleMatch && titleMatch[1]) videoTitle = titleMatch[1].trim();
-            transcriptText = markdown;
+            if (markdown && markdown.length > 100 && !markdown.includes('Blocked') && !markdown.includes('Sign in to confirm')) {
+              const titleMatch = markdown.match(/Title:\s*(.+)/);
+              if (titleMatch && titleMatch[1]) videoTitle = titleMatch[1].trim();
+              transcriptText = markdown;
+            }
           }
         } catch {
-          // fallback
+          // 次のフォールバックへ
+        }
+
+        // 方式 B: パブリック Invidious / Piped インスタンスからの字幕取得
+        if (!transcriptText || transcriptText.length < 50) {
+          const invidiousInstances = [
+            'https://inv.tux.pizza',
+            'https://invidious.nerdvpn.de',
+            'https://yt.artemislena.eu'
+          ];
+          for (const instance of invidiousInstances) {
+            try {
+              const infoRes = await fetch(`${instance}/api/v1/videos/${videoId}`);
+              if (infoRes.ok) {
+                const info = await infoRes.json();
+                if (info.title) videoTitle = info.title;
+                if (info.description) {
+                  transcriptText = `### 動画概要・チャプター\n${info.description}`;
+                }
+                // 字幕トラックがあれば結合
+                if (Array.isArray(info.captions) && info.captions.length > 0) {
+                  const subTrack = info.captions.find((c: any) => c.languageCode?.startsWith('ja')) || info.captions[0];
+                  if (subTrack && subTrack.url) {
+                    const subRes = await fetch(`${instance}${subTrack.url}`);
+                    if (subRes.ok) {
+                      const vttText = await subRes.text();
+                      const cleanSubs = vttText
+                        .replace(/WEBVTT[\s\S]*?\n\n/, '')
+                        .replace(/\d{2}:\d{2}:\d{2}\.\d{3}\s*-->\s*\d{2}:\d{2}:\d{2}\.\d{3}.*\n/g, '')
+                        .replace(/<[^>]+>/g, '')
+                        .replace(/\n\s*\n+/g, '\n')
+                        .trim();
+                      if (cleanSubs.length > 50) {
+                        transcriptText = `### 📝 動画字幕データ\n\n${cleanSubs}\n\n---\n### 動画概要\n${info.description || ''}`;
+                        break;
+                      }
+                    }
+                  }
+                }
+                if (transcriptText.length > 100) break;
+              }
+            } catch {
+              continue;
+            }
+          }
+        }
+
+        // 方式 C: Google Gemini API によるダイレクト動画理解＆要約（APIキーあり時）
+        if ((!transcriptText || transcriptText.length < 50) && cloudApiKey && cloudApiKey.trim().length > 0) {
+          try {
+            const prompt = `以下のYouTube動画を多角的に分析し、話者の発言内容、重要論点、議事録、および詳細な書き起こしサマリーを日本語のMarkdown形式で作成してください。\nURL: https://www.youtube.com/watch?v=${videoId}`;
+            let geminiResult = '';
+            const genConfig: any = {
+              mode: 'cloud-gemini',
+              cloudApiKey: cloudApiKey.trim()
+            };
+            for await (const chunk of llmService.streamChat(
+              [
+                { role: 'system', content: 'あなたはYouTube動画の分析・文字起こし要約の専門家です。' },
+                { role: 'user', content: prompt }
+              ],
+              genConfig
+            )) {
+              geminiResult += chunk;
+            }
+            if (geminiResult && geminiResult.length > 50) {
+              transcriptText = geminiResult;
+            }
+          } catch (geminiErr) {
+            console.warn('Gemini direct video parsing failed:', geminiErr);
+          }
         }
 
         if (!transcriptText || transcriptText.length < 50) {
-          throw new Error('YouTubeの文字起こし・字幕データを取得できませんでした。');
+          throw new Error(
+            'YouTubeの文字起こし・字幕データを自動取得できませんでした。\n' +
+            '【対策】\n' +
+            '1. 右上の設定アイコンから「Google AI Studio APIキー」を入力すると、Geminiが動画URLから直接内容を自動解析します。\n' +
+            '2. または、動画から抽出した音声ファイル（mp3/m4a/wav等）を直接ドロップしてWhisper文字起こしを実行してください。'
+          );
         }
 
         const formattedDoc = `## 📺 YouTube動画 文字起こしデータ\n- **URL:** ${rawUrl}\n- **タイトル:** ${videoTitle}\n- **取得時刻:** ${new Date().toLocaleString('ja-JP')}\n\n---\n\n${transcriptText}`;
