@@ -85,7 +85,7 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
   const [targetProjId, setTargetProjId] = useState<string>('');
   const [transferMode, setTransferMode] = useState<'copy' | 'move'>('copy');
   const [isTransferring, setIsTransferring] = useState(false);
-  const [filterTab, setFilterTab] = useState<'all' | 'files' | 'brain'>('all');
+  const [filterTab, setFilterTab] = useState<'all' | 'files' | 'brain'>('files');
 
   // Web記事 & YouTube インポートモーダル
   const [showUrlModal, setShowUrlModal] = useState(false);
@@ -407,17 +407,6 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
       <div className="flex items-center space-x-1 mb-2.5 p-1 bg-slate-900/80 rounded-xl border border-slate-800 text-[11px] font-semibold">
         <button
           type="button"
-          onClick={() => setFilterTab('all')}
-          className={`flex-1 py-1 rounded-lg text-center transition-all ${
-            filterTab === 'all'
-              ? 'bg-slate-800 text-slate-100 shadow-sm border border-slate-700/60'
-              : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          すべて ({documents.length})
-        </button>
-        <button
-          type="button"
           onClick={() => setFilterTab('files')}
           className={`flex-1 py-1 rounded-lg text-center transition-all ${
             filterTab === 'files'
@@ -438,6 +427,17 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
         >
           <Sparkles className="w-3 h-3 text-amber-300 fill-amber-300" />
           <span>🧠 補助脳 ({documents.filter(d => d.title.includes('AI補助脳')).length})</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setFilterTab('all')}
+          className={`flex-1 py-1 rounded-lg text-center transition-all ${
+            filterTab === 'all'
+              ? 'bg-slate-800 text-slate-100 shadow-sm border border-slate-700/60'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          すべて ({documents.length})
         </button>
       </div>
 

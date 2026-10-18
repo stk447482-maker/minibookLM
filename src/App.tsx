@@ -10,6 +10,7 @@ import { DocumentSource, ChatMessage, StudioArtifact, ModelConfig, Project } fro
 import { ragManager } from './services/ragManager.ts';
 import { dbService } from './services/db.ts';
 import { securityGuard } from './services/securityGuard.ts';
+import { localSyncService } from './services/localSyncService.ts';
 import { useChatSession } from './hooks/useChatSession.ts';
 import { useDocumentManager } from './hooks/useDocumentManager.ts';
 import { useStudioManager } from './hooks/useStudioManager.ts';
@@ -136,7 +137,24 @@ export const App: React.FC = () => {
   useEffect(() => {
     const initApp = async () => {
       try {
-        const savedProjects = await dbService.getAllProjects();
+        let savedProjects = await dbService.getAllProjects();
+
+        // 📁 PCローカル同期フォルダから自動読込（設定されている場合）
+        try {
+          const localPackages = await localSyncService.checkAndLoadFromDirectory();
+          if (localPackages && localPackages.length > 0) {
+            for (const pkg of localPackages) {
+              const exists = savedProjects.some(p => p.id === pkg.project.id);
+              if (!exists) {
+                await dbService.importProjectPackage(JSON.stringify(pkg));
+              }
+            }
+            savedProjects = await dbService.getAllProjects();
+          }
+        } catch {
+          // ignore
+        }
+
         if (savedProjects.length === 0) {
           const defaultProj: Project = {
             id: `proj_${Date.now()}`,
@@ -176,6 +194,9 @@ export const App: React.FC = () => {
         setArtifacts(arts);
 
         await ragManager.loadProjectChunks(chunks);
+
+        // 📁 ローカル同期フォルダへ最新状態を自動保存
+        localSyncService.autoSaveToDirectory(activeProject, docs, chunks, msgs, arts);
       } catch (err) {
         console.error('プロジェクトデータ読み込みエラー:', err);
       }
@@ -195,6 +216,9 @@ export const App: React.FC = () => {
     await dbService.saveProject(newProj);
     setProjects(prev => [...prev, newProj]);
     setActiveProject(newProj);
+
+    // 📁 ローカル同期フォルダへ即時自動バックアップ
+    localSyncService.autoSaveToDirectory(newProj, [], [], [], []);
   };
 
   // プロジェクト削除

@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { X, Smartphone, Laptop, Sparkles, Check, Cloud, Key, Folder, RefreshCw, Zap, Download, Database, Cpu, Volume2, HardDrive, Trash2 } from 'lucide-react';
+import { X, Smartphone, Laptop, Sparkles, Check, Cloud, Key, Folder, RefreshCw, Zap, Download, Database, Cpu, Volume2, HardDrive, Trash2, FolderSync, ShieldCheck } from 'lucide-react';
 import { ModelConfig, ModelMode, ModelTuningProfile } from '../types/index.ts';
 import { dbService } from '../services/db.ts';
 import { llmService } from '../services/llmService.ts';
+import { localSyncService } from '../services/localSyncService.ts';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -35,6 +36,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [isClearingCache, setIsClearingCache] = useState(false);
   const [clearCacheSuccess, setClearCacheSuccess] = useState(false);
 
+  // 📁 PCローカルフォルダ自動同期＆スマホ永続化ステート
+  const [syncFolderName, setSyncFolderName] = useState<string | null>(null);
+  const [isPersistedStorage, setIsPersistedStorage] = useState<boolean>(false);
+  const [isRequestingPersist, setIsRequestingPersist] = useState<boolean>(false);
+
   const refreshStorageUsage = async () => {
     try {
       const { usedBytes, quotaBytes, percent } = await dbService.getStorageUsage();
@@ -45,8 +51,48 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         quotaMb,
         percent: percent.toFixed(1)
       });
+
+      const activeDir = await localSyncService.getActiveDirectoryName();
+      setSyncFolderName(activeDir);
+
+      const persisted = await localSyncService.isStoragePersisted();
+      setIsPersistedStorage(persisted);
     } catch {
       // ignore
+    }
+  };
+
+  const handlePickSyncFolder = async () => {
+    try {
+      const folder = await localSyncService.pickSyncDirectory();
+      if (folder) {
+        setSyncFolderName(folder);
+        alert(`同期フォルダ「${folder}」を連携しました。プロジェクト変更時に自動保存されます。`);
+      }
+    } catch (e: any) {
+      alert(e.message || 'フォルダ選択エラー');
+    }
+  };
+
+  const handleDisconnectSyncFolder = async () => {
+    if (window.confirm('ローカルフォルダとの自動同期を解除しますか？')) {
+      await localSyncService.disconnectSyncDirectory();
+      setSyncFolderName(null);
+    }
+  };
+
+  const handleRequestPersist = async () => {
+    setIsRequestingPersist(true);
+    try {
+      const success = await localSyncService.requestPersistentStorage();
+      setIsPersistedStorage(success);
+      if (success) {
+        alert('✅ 端末ストレージ保護を有効化しました！ブラウザやOSによる自動データ消去が防止されます。');
+      } else {
+        alert('ブラウザにより永続化が保留されました。ブックマーク登録やホーム画面追加(PWA)後に再試行してください。');
+      }
+    } finally {
+      setIsRequestingPersist(false);
     }
   };
 
@@ -1058,6 +1104,83 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <Trash2 className="w-3.5 h-3.5" />
                 <span>{isClearingCache ? '削除中...' : clearCacheSuccess ? 'クリア完了' : 'キャッシュ削除'}</span>
               </button>
+            </div>
+          </div>
+
+          {/* 📁 ローカルフォルダ自動同期 (PC) ＆ 端末ストレージ保護 (スマホ) */}
+          <div className="pt-2 border-t border-slate-800/80">
+            <div className="flex items-center space-x-1.5 text-xs font-bold text-slate-200 mb-2">
+              <FolderSync className="w-3.5 h-3.5 text-emerald-400" />
+              <span>📁 ローカルフォルダ自動保存 ＆ 端末ストレージ保護</span>
+            </div>
+
+            <div className="space-y-2">
+              {/* PC用: File System Access API フォルダ同期 */}
+              {localSyncService.isFileSystemAccessSupported() ? (
+                <div className="flex items-center justify-between bg-slate-900/60 border border-slate-800 rounded-xl p-3">
+                  <div>
+                    <div className="text-xs font-medium text-slate-200 flex items-center space-x-1.5">
+                      <span>PCローカル同期フォルダ:</span>
+                      <span className="font-mono text-emerald-400 bg-emerald-950/40 border border-emerald-500/30 px-2 py-0.5 rounded text-[11px]">
+                        {syncFolderName ? `📁 ${syncFolderName}` : '未設定'}
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-slate-400 mt-0.5">
+                      プロジェクト作成・編集時にこのフォルダへ自動保存し、起動時に自動読み込みます
+                    </div>
+                  </div>
+
+                  <div className="flex items-center space-x-1.5 shrink-0 ml-3">
+                    {syncFolderName ? (
+                      <button
+                        type="button"
+                        onClick={handleDisconnectSyncFolder}
+                        className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold transition-all"
+                      >
+                        解除
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={handlePickSyncFolder}
+                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold transition-all shadow-sm"
+                      >
+                        フォルダを選択
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ) : null}
+
+              {/* スマホ / 全環境: 永続ストレージ (Persistent Storage) */}
+              <div className="flex items-center justify-between bg-slate-900/60 border border-slate-800 rounded-xl p-3">
+                <div>
+                  <div className="text-xs font-medium text-slate-200 flex items-center space-x-1.5">
+                    <ShieldCheck className={`w-3.5 h-3.5 ${isPersistedStorage ? 'text-emerald-400' : 'text-slate-400'}`} />
+                    <span>端末ストレージ保護 (PWA Persistent Storage)</span>
+                  </div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">
+                    スマホやブラウザの空き容量不足時に、OSがキャッシュを勝手に自動削除するのを防止
+                  </div>
+                </div>
+
+                <div className="shrink-0 ml-3">
+                  {isPersistedStorage ? (
+                    <span className="text-[11px] font-bold text-emerald-400 bg-emerald-950/40 border border-emerald-500/30 px-2.5 py-1 rounded-lg">
+                      ✅ 保護中
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleRequestPersist}
+                      disabled={isRequestingPersist}
+                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold transition-all disabled:opacity-50"
+                    >
+                      {isRequestingPersist ? 'リクエスト中...' : '保護を有効化'}
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         </div>
