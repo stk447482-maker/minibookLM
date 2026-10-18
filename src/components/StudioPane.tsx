@@ -365,13 +365,21 @@ ${currentArtifact.content}
 
       {/* ⚡ 生成アクションエリア */}
       <div className="space-y-2 shrink-0 bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/80">
+        {enabledDocsCount === 0 && (
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg px-2.5 py-1.5 text-[11px] text-amber-300 flex items-center justify-between">
+            <span>👈 左の資料一覧でチェックを入れてください</span>
+            <span className="font-mono text-[10px] bg-amber-500/20 px-1 rounded">0件選択</span>
+          </div>
+        )}
+
         {/* メイン生成ボタン & 中止ボタン */}
         <div className="flex items-center space-x-1.5">
           <button
             type="button"
             onClick={() => handleGenerateClick()}
             disabled={isGeneratingStudio || enabledDocsCount === 0}
-            className="flex-1 py-2.5 px-4 bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 disabled:from-slate-800 disabled:to-slate-800 text-white disabled:text-slate-500 rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-2 shadow-md hover:shadow-indigo-500/20 active:scale-[0.99]"
+            title={enabledDocsCount === 0 ? '左側の資料一覧から対象ドキュメントにチェックを入れてください' : undefined}
+            className="flex-1 py-2.5 px-4 bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 disabled:from-slate-800 disabled:to-slate-800 text-white disabled:text-slate-500 rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-2 shadow-md hover:shadow-indigo-500/20 active:scale-[0.99] disabled:cursor-not-allowed"
           >
             {isGeneratingStudio ? (
               <>

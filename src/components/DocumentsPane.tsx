@@ -408,14 +408,16 @@ export const DocumentsPane: React.FC<DocumentsPaneProps> = ({
           </span>
         </div>
         <select
-          value={audioEngine || 'whisper-small'}
+          value={audioEngine || 'auto'}
           onChange={(e) => onChangeAudioEngine?.(e.target.value as any)}
           className="w-full bg-slate-900 border border-purple-500/40 rounded-lg px-2.5 py-1.5 text-xs text-purple-200 focus:outline-none focus:border-purple-400 font-medium"
         >
-          <option value="whisper-small">⚡ 選択肢A: Whisper Small (ローカル高速・約15分・完全無料)</option>
-          <option value="gemini">🚀 選択肢B: Gemini 1.5 Flash (超高速クラウド・約1分・要APIキー)</option>
-          <option value="whisper-large-v3">🎯 選択肢C: Whisper Large-v3 分割表示 (最高精度・進捗ストリーム)</option>
-          <option value="auto">🤖 自動判定 (ファイルサイズと接続に応じて最適選択)</option>
+          <option value="auto">🚀 自動最適化 (Native優先 / WebGPU / Gemini)</option>
+          <option value="native-kotoba">🔥 Kotoba-Whisper (C++ Native・最高峰日本語)</option>
+          <option value="native-large-v3">👑 Whisper Large-v3 (FP16 Native・最高峰多言語)</option>
+          <option value="kotoba-whisper">🌐 Kotoba-Whisper (WebGPU/PWA・完全ブラウザ完結)</option>
+          <option value="gemini">☁️ Gemini 1.5 Flash (超高速クラウド・10秒解析)</option>
+          <option value="whisper-local">⚡ Whisper Tiny (超軽量・英語/多言語)</option>
         </select>
       </div>
 
