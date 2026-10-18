@@ -3,6 +3,7 @@ import { Project, DocumentSource, ChatMessage, ModelConfig, SourceReference } fr
 import { dbService } from '../services/db';
 import { ragManager } from '../services/ragManager';
 import { llmService } from '../services/llmService';
+import { WebSearchService, WebSearchResult } from '../services/webSearchService';
 
 interface UseChatSessionProps {
   activeProject: Project | null;
@@ -46,7 +47,7 @@ export function useChatSession({
   };
 
   // チャット質問送信＆RAGストリーミング
-  const handleSendMessage = async (query: string, isDirectRAG: boolean = false) => {
+  const handleSendMessage = async (query: string, isDirectRAG: boolean = false, enableWebSearch: boolean = false) => {
     if (!activeProject) return;
 
     const userMsg: ChatMessage = {
@@ -74,6 +75,17 @@ export function useChatSession({
       let searchResults: any[] = [];
       let graphSummary = '';
       let activeDocTitles: string[] = [];
+
+      // 🌐 Web検索補助情報の取得（ONの場合のみ、手元資料を補完するために実行）
+      let webSources: WebSearchResult[] = [];
+      if (enableWebSearch) {
+        setStatusMessage('🌐 インターネットから最新情報を収集・補完中...');
+        try {
+          webSources = await WebSearchService.searchWeb(query, 3);
+        } catch (webErr) {
+          console.warn('Web search error:', webErr);
+        }
+      }
 
       // 🎯 モデル能力階層（Tier）の判定
       // tier 1: 0.5B (超軽量・整文特化)
@@ -226,6 +238,26 @@ ${skeleton.formattedContextForLLM}
 
 【参照ドキュメント全文抜粋】
 ${searchResults.map((s, idx) => `[${idx + 1}] 資料: ${s.docTitle}\n${s.fullContext}`).join('\n\n')}`;
+      }
+
+      // 🌐 Web検索補助情報のプロンプト結合
+      let webPromptSection = '';
+      if (webSources.length > 0) {
+        webPromptSection = `\n\n【🌐 Web最新補足情報（手元資料に不足している最新情報や補足用）】
+※【絶対ルール】手元資料の内容を最優先とし、手元資料に書かれていない最新動向や定義の補足としてのみ以下のWeb情報を活用してください。Web由来の情報には文中に [🌐 サイト名] と出典を明記してください。
+${webSources.map((w, idx) => `[Web ${idx + 1}] ${w.title}\nURL: ${w.url}\n概要: ${w.snippet}`).join('\n\n')}`;
+        systemPrompt += webPromptSection;
+
+        // チャットUIの根拠ソースチップにも Web 補足情報を追加
+        webSources.forEach((w, idx) => {
+          searchResults.push({
+            chunkId: `web_${idx}_${Date.now()}`,
+            docTitle: `🌐 [Web] ${w.title.slice(0, 30)}`,
+            snippet: w.snippet,
+            fullContext: `【タイトル】${w.title}\n【URL】${w.url}\n\n【概要】\n${w.snippet}`,
+            score: 0.95
+          });
+        });
       }
 
       const assistantMsgId = `asst_${Date.now()}`;

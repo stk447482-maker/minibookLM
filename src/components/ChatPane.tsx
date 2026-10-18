@@ -1,11 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, Sparkles, ChevronDown, ChevronUp, FileText, Zap, PlusCircle, Trash2, RotateCcw, Mic, MicOff, Volume2, ExternalLink, X, Lightbulb, Headphones } from 'lucide-react';
+import { Send, Bot, User, Sparkles, ChevronDown, ChevronUp, FileText, Zap, PlusCircle, Trash2, RotateCcw, Mic, MicOff, Volume2, ExternalLink, X, Lightbulb, Headphones, Globe } from 'lucide-react';
 import { MarkdownViewer } from './MarkdownViewer.tsx';
 import { ChatMessage, SourceReference } from '../types/index.ts';
 
 interface ChatPaneProps {
   messages: ChatMessage[];
-  onSendMessage: (query: string, isDirectRAG?: boolean) => void;
+  onSendMessage: (query: string, isDirectRAG?: boolean, enableWebSearch?: boolean) => void;
   onClearMessages: () => void;
   onDeleteMessage: (id: string) => void;
   onAddToSource: (title: string, content: string) => void;
@@ -39,6 +39,9 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const [isHandsFree, setIsHandsFree] = useState(false);
   const isHandsFreeRef = useRef(false);
   isHandsFreeRef.current = isHandsFree;
+
+  // 🌐 Web検索補助モードのトグル（手元資料を最優先しつつ、不足情報をインターネットから補完）
+  const [enableWebSearch, setEnableWebSearch] = useState(false);
 
   // ブラウザの音声認識対応状況チェック (Chrome, Edge等で有効、Firefox等では非対応)
   const isSpeechSupported = typeof window !== 'undefined' && 
@@ -115,7 +118,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           setIsListening(false);
           // ハンズフリーモード時は自動送信
           if (isHandsFreeRef.current) {
-            onSendMessage(transcript, false);
+            onSendMessage(transcript, false, enableWebSearch);
             setInput('');
           }
         }
@@ -165,7 +168,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       recognitionRef.current.stop();
       setIsListening(false);
     }
-    onSendMessage(input.trim(), isDirectRAG);
+    onSendMessage(input.trim(), isDirectRAG, enableWebSearch);
     setInput('');
   };
 
@@ -395,6 +398,26 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
       {/* 入力フォーム */}
       <div className="p-4 border-t border-slate-800/80 bg-slate-900/60 backdrop-blur">
+        {/* 🎛️ 入力補助ツールバー（🌐 Web検索補完トグル） */}
+        <div className="flex items-center justify-between pb-2 px-1 text-[11px]">
+          <button
+            type="button"
+            onClick={() => setEnableWebSearch(prev => !prev)}
+            className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-lg border transition-all ${
+              enableWebSearch
+                ? 'bg-sky-950/70 border-sky-400/80 text-sky-200 shadow-sm shadow-sky-500/20'
+                : 'bg-slate-800/60 border-slate-700/60 text-slate-400 hover:text-slate-300'
+            }`}
+            title="手元資料の内容を最優先にしつつ、不足している最新情報や定義をWeb検索から自動補完します"
+          >
+            <Globe className={`w-3.5 h-3.5 ${enableWebSearch ? 'text-sky-400 animate-pulse' : 'text-slate-400'}`} />
+            <span className="font-semibold">{enableWebSearch ? '🌐 Web検索補完: ON' : '🌐 Web補完: OFF'}</span>
+          </button>
+          <span className="text-slate-500 text-[10px] hidden sm:inline">
+            {enableWebSearch ? '手元資料を最優先し、最新情報をWebから補完します' : '手元資料のみを参照して回答します'}
+          </span>
+        </div>
+
         <form onSubmit={(e) => handleSubmit(e, false)} className="flex items-center space-x-2">
           <input
             type="text"
