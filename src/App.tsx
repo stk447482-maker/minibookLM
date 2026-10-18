@@ -255,6 +255,53 @@ export const App: React.FC = () => {
     });
   };
 
+  // 📐 3ペインのドラッグ自由リサイズ（幅保存＆復元）
+  const [leftPaneWidth, setLeftPaneWidth] = useState<number>(() => {
+    const saved = localStorage.getItem('minibooklm_left_width');
+    return saved ? Math.max(220, Math.min(600, parseInt(saved, 10))) : 340;
+  });
+  const [rightPaneWidth, setRightPaneWidth] = useState<number>(() => {
+    const saved = localStorage.getItem('minibooklm_right_width');
+    return saved ? Math.max(260, Math.min(800, parseInt(saved, 10))) : 380;
+  });
+  const [isDraggingLeft, setIsDraggingLeft] = useState(false);
+  const [isDraggingRight, setIsDraggingRight] = useState(false);
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (isDraggingLeft) {
+        const newWidth = Math.max(220, Math.min(600, e.clientX));
+        setLeftPaneWidth(newWidth);
+        localStorage.setItem('minibooklm_left_width', String(newWidth));
+      } else if (isDraggingRight) {
+        const newWidth = Math.max(260, Math.min(800, window.innerWidth - e.clientX));
+        setRightPaneWidth(newWidth);
+        localStorage.setItem('minibooklm_right_width', String(newWidth));
+      }
+    };
+    const handleMouseUp = () => {
+      setIsDraggingLeft(false);
+      setIsDraggingRight(false);
+    };
+
+    if (isDraggingLeft || isDraggingRight) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    } else {
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, [isDraggingLeft, isDraggingRight]);
+
   if (!isAuthenticated) {
     return <AuthGate onAuthenticated={() => setIsAuthenticated(true)} />;
   }
@@ -273,10 +320,11 @@ export const App: React.FC = () => {
       />
 
 
-      <main className="flex-1 flex overflow-hidden">
+      <main className="flex-1 flex overflow-hidden relative">
         {/* 左ペイン: ソース＆プロジェクト管理 */}
         <div
-          className={`h-full md:w-80 lg:w-96 shrink-0 md:block ${
+          style={{ width: activeMobileTab === 'docs' ? '100%' : `${leftPaneWidth}px` }}
+          className={`h-full shrink-0 md:block ${
             activeMobileTab === 'docs' ? 'w-full block' : 'hidden md:block'
           }`}
         >
@@ -314,6 +362,19 @@ export const App: React.FC = () => {
           />
         </div>
 
+        {/* ↔️ 左ペイン リサイズスプリッター（PC用ドラッグバー） */}
+        <div
+          onMouseDown={() => setIsDraggingLeft(true)}
+          onDoubleClick={() => {
+            setLeftPaneWidth(340);
+            localStorage.setItem('minibooklm_left_width', '340');
+          }}
+          title="ドラッグで幅を自由にリサイズ（ダブルクリックで既定値に戻す）"
+          className="hidden md:flex w-1.5 hover:w-2 shrink-0 cursor-col-resize bg-slate-800/80 hover:bg-indigo-500 active:bg-indigo-400 transition-all items-center justify-center group z-10"
+        >
+          <div className="w-0.5 h-8 bg-slate-600 group-hover:bg-white rounded-full transition-colors" />
+        </div>
+
         {/* 中央ペイン: チャット画面 */}
         <div
           className={`h-full flex-1 min-w-0 overflow-hidden md:block ${
@@ -335,9 +396,23 @@ export const App: React.FC = () => {
           />
         </div>
 
+        {/* ↔️ 右ペイン リサイズスプリッター（PC用ドラッグバー） */}
+        <div
+          onMouseDown={() => setIsDraggingRight(true)}
+          onDoubleClick={() => {
+            setRightPaneWidth(380);
+            localStorage.setItem('minibooklm_right_width', '380');
+          }}
+          title="ドラッグで幅を自由にリサイズ（ダブルクリックで既定値に戻す）"
+          className="hidden md:flex w-1.5 hover:w-2 shrink-0 cursor-col-resize bg-slate-800/80 hover:bg-indigo-500 active:bg-indigo-400 transition-all items-center justify-center group z-10"
+        >
+          <div className="w-0.5 h-8 bg-slate-600 group-hover:bg-white rounded-full transition-colors" />
+        </div>
+
         {/* 右ペイン: Studio生成物 */}
         <div
-          className={`h-full md:w-80 lg:w-96 shrink-0 md:block ${
+          style={{ width: activeMobileTab === 'studio' ? '100%' : `${rightPaneWidth}px` }}
+          className={`h-full shrink-0 md:block ${
             activeMobileTab === 'studio' ? 'w-full block' : 'hidden md:block'
           }`}
         >

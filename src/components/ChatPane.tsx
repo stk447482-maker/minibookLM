@@ -396,109 +396,119 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* 入力フォーム */}
-      <div className="p-4 border-t border-slate-800/80 bg-slate-900/60 backdrop-blur">
-        {/* 🎛️ 入力補助ツールバー（🌐 Web検索補完トグル） */}
-        <div className="flex items-center justify-between pb-2 px-1 text-[11px]">
-          <button
-            type="button"
-            onClick={() => setEnableWebSearch(prev => !prev)}
-            className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-lg border transition-all ${
-              enableWebSearch
-                ? 'bg-sky-950/70 border-sky-400/80 text-sky-200 shadow-sm shadow-sky-500/20'
-                : 'bg-slate-800/60 border-slate-700/60 text-slate-400 hover:text-slate-300'
-            }`}
-            title="手元資料の内容を最優先にしつつ、不足している最新情報や定義をWeb検索から自動補完します"
-          >
-            <Globe className={`w-3.5 h-3.5 ${enableWebSearch ? 'text-sky-400 animate-pulse' : 'text-slate-400'}`} />
-            <span className="font-semibold">{enableWebSearch ? '🌐 Web検索補完: ON' : '🌐 Web補完: OFF'}</span>
-          </button>
-          <span className="text-slate-500 text-[10px] hidden sm:inline">
-            {enableWebSearch ? '手元資料を最優先し、最新情報をWebから補完します' : '手元資料のみを参照して回答します'}
-          </span>
-        </div>
-
-        <form onSubmit={(e) => handleSubmit(e, false)} className="flex items-center space-x-2">
-          <input
-            type="text"
+      {/* 入力フォーム (2段式レスポンシブコンテナ) */}
+      <div className="p-3 sm:p-4 border-t border-slate-800/80 bg-slate-900/60 backdrop-blur">
+        <form onSubmit={(e) => handleSubmit(e, false)} className="bg-slate-800/90 border border-slate-700/80 rounded-2xl p-2.5 sm:p-3 focus-within:border-indigo-500 focus-within:ring-1 focus-within:ring-indigo-500/50 transition-all shadow-lg">
+          {/* 上段: 広々としたテキスト入力欄 */}
+          <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder={isListening ? "🎙️ 音声を聴き取っています... 話してください" : "選択したドキュメントについて質問する..."}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSubmit(e, false);
+              }
+            }}
+            rows={2}
+            placeholder={isListening ? "🎙️ 音声を聴き取っています... 話してください" : "選択したドキュメントについて質問する... (Enterで送信, Shift+Enterで改行)"}
             disabled={isGenerating}
-            className={`flex-1 bg-slate-800/90 border rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-1 transition-all disabled:opacity-50 ${
-              isListening
-                ? 'border-rose-500 ring-rose-500/50 bg-rose-950/20 text-rose-200 placeholder-rose-400'
-                : 'border-slate-700/80 focus:border-indigo-500 focus:ring-indigo-500'
+            className={`w-full bg-transparent resize-none text-sm text-slate-100 placeholder-slate-500 focus:outline-none transition-all disabled:opacity-50 ${
+              isListening ? 'text-rose-200 placeholder-rose-400' : ''
             }`}
           />
 
-          <button
-            type="button"
-            onClick={toggleHandsFree}
-            disabled={isGenerating || !isSpeechSupported}
-            className={`p-3 rounded-xl border transition-all shrink-0 flex items-center justify-center space-x-1 ${
-              !isSpeechSupported
-                ? 'opacity-40 cursor-not-allowed bg-slate-800 border-slate-700 text-slate-500'
-                : isHandsFree
-                ? 'bg-purple-600 text-white border-purple-400 animate-pulse shadow-lg shadow-purple-600/30'
-                : 'bg-slate-800 hover:bg-slate-750 text-slate-400 hover:text-purple-300 border-slate-700'
-            }`}
-            title={
-              !isSpeechSupported
-                ? 'お使いのブラウザは音声認識非対応です（Chrome / Edge をご利用ください）'
-                : isHandsFree
-                ? 'ハンズフリー通話モードを停止'
-                : '🎧 ハンズフリー通話モードを開始（声で話す ➔ AI回答 ➔ 自動音声再生 ➔ 自動で次の待ち受けへ）'
-            }
-          >
-            <Headphones className="w-4 h-4" />
-            <span className="text-[10px] font-bold hidden md:inline">
-              {!isSpeechSupported ? '非対応' : isHandsFree ? '通話中' : '通話'}
-            </span>
-          </button>
+          {/* 下段コントロールバー */}
+          <div className="flex items-center justify-between pt-2 border-t border-slate-700/50 mt-1 gap-1.5 flex-wrap sm:flex-nowrap">
+            {/* 左側アクション群 */}
+            <div className="flex items-center space-x-1.5 flex-wrap gap-y-1">
+              {/* 🌐 Web検索補完トグル */}
+              <button
+                type="button"
+                onClick={() => setEnableWebSearch(prev => !prev)}
+                className={`flex items-center space-x-1 px-2.5 py-1.5 rounded-lg border text-[11px] font-semibold transition-all ${
+                  enableWebSearch
+                    ? 'bg-sky-950/80 border-sky-400 text-sky-200 shadow-sm shadow-sky-500/20'
+                    : 'bg-slate-900/60 border-slate-700/70 text-slate-400 hover:text-slate-300'
+                }`}
+                title="手元資料を最優先しつつ、不足している最新情報や定義をWeb検索から自動補完します"
+              >
+                <Globe className={`w-3.5 h-3.5 ${enableWebSearch ? 'text-sky-400 animate-pulse' : 'text-slate-400'}`} />
+                <span className="hidden xs:inline">{enableWebSearch ? 'Web補完: ON' : 'Web補完'}</span>
+              </button>
 
-          <button
-            type="button"
-            onClick={toggleListening}
-            disabled={isGenerating || !isSpeechSupported}
-            className={`p-3 rounded-xl border transition-all shrink-0 flex items-center justify-center ${
-              !isSpeechSupported
-                ? 'opacity-40 cursor-not-allowed bg-slate-800 border-slate-700 text-slate-500'
-                : isListening
-                ? 'bg-rose-600 text-white border-rose-500 animate-pulse shadow-lg shadow-rose-600/30'
-                : 'bg-slate-800 hover:bg-slate-750 text-slate-400 hover:text-slate-200 border-slate-700'
-            }`}
-            title={
-              !isSpeechSupported
-                ? 'お使いのブラウザは音声認識非対応です（Chrome / Edge 推奨）'
-                : isListening
-                ? '音声入力を終了'
-                : '音声で話しかける (単発音声入力)'
-            }
-          >
-            {isListening ? <MicOff className="w-4 h-4 text-white" /> : <Mic className="w-4 h-4" />}
-          </button>
+              {/* 🎯 原文ファクト抽出 */}
+              <button
+                type="button"
+                onClick={(e) => handleSubmit(e, true)}
+                disabled={!input.trim() || isGenerating}
+                className="px-2.5 py-1.5 bg-slate-900/60 hover:bg-emerald-950/50 hover:border-emerald-500/60 disabled:opacity-40 text-emerald-400 border border-slate-700/70 rounded-lg text-[11px] font-semibold transition-all flex items-center space-x-1"
+                title="【ハルシネーション完全ゼロ・0秒即答】\nLLMの文章要約を通さず、選択した資料から直接該当する数値・条項・事実を抽出してシート出力します。"
+              >
+                <Zap className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="hidden sm:inline">原文ファクト抽出</span>
+              </button>
 
-          {/* 🎯 原文ファクト抽出（旧・厳密RAG抽出）: LLM生成を通さず資料から該当事実・数値を0秒抽出 */}
-          <button
-            type="button"
-            onClick={(e) => handleSubmit(e, true)}
-            disabled={!input.trim() || isGenerating}
-            className="px-3.5 py-3 bg-slate-800 hover:bg-emerald-950/40 hover:border-emerald-500/60 disabled:opacity-40 text-emerald-400 hover:text-emerald-300 border border-slate-700 rounded-xl text-xs font-bold transition-all shrink-0 flex items-center space-x-1 shadow-sm"
-            title="【ハルシネーション完全ゼロ・0秒即答】\nLLMの文章要約を通さず、選択した資料から直接該当する数値・条項・事実を抽出してシート出力します。"
-          >
-            <Zap className="w-4 h-4 text-emerald-400" />
-            <span className="hidden sm:inline">原文ファクト抽出</span>
-          </button>
+              {/* 🎧 ハンズフリー通話 */}
+              <button
+                type="button"
+                onClick={toggleHandsFree}
+                disabled={isGenerating || !isSpeechSupported}
+                className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-semibold transition-all flex items-center space-x-1 ${
+                  !isSpeechSupported
+                    ? 'opacity-40 cursor-not-allowed bg-slate-900/60 border-slate-700/70 text-slate-500'
+                    : isHandsFree
+                    ? 'bg-purple-600 text-white border-purple-400 animate-pulse shadow-sm shadow-purple-600/30'
+                    : 'bg-slate-900/60 hover:bg-slate-800 text-slate-400 hover:text-purple-300 border-slate-700/70'
+                }`}
+                title={
+                  !isSpeechSupported
+                    ? 'お使いのブラウザは音声認識非対応です（Chrome / Edge をご利用ください）'
+                    : isHandsFree
+                    ? 'ハンズフリー通話モードを停止'
+                    : '🎧 ハンズフリー通話モードを開始'
+                }
+              >
+                <Headphones className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">
+                  {!isSpeechSupported ? '非対応' : isHandsFree ? '通話中' : '通話'}
+                </span>
+              </button>
 
-          <button
-            type="submit"
-            disabled={!input.trim() || isGenerating}
-            className="p-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white disabled:text-slate-500 rounded-xl transition-all shadow-md shadow-indigo-600/20 disabled:shadow-none shrink-0"
-            title="AI回答を生成 (自然な対話・要約)"
-          >
-            <Send className="w-4 h-4" />
-          </button>
+              {/* 🎙️ 音声入力 */}
+              <button
+                type="button"
+                onClick={toggleListening}
+                disabled={isGenerating || !isSpeechSupported}
+                className={`p-1.5 rounded-lg border transition-all ${
+                  !isSpeechSupported
+                    ? 'opacity-40 cursor-not-allowed bg-slate-900/60 border-slate-700/70 text-slate-500'
+                    : isListening
+                    ? 'bg-rose-600 text-white border-rose-500 animate-pulse shadow-sm'
+                    : 'bg-slate-900/60 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border-slate-700/70'
+                }`}
+                title={
+                  !isSpeechSupported
+                    ? 'お使いのブラウザは音声認識非対応です（Chrome / Edge 推奨）'
+                    : isListening
+                    ? '音声入力を終了'
+                    : '音声で話しかける (単発音声入力)'
+                }
+              >
+                {isListening ? <MicOff className="w-3.5 h-3.5 text-white" /> : <Mic className="w-3.5 h-3.5" />}
+              </button>
+            </div>
+
+            {/* 右側: 送信ボタン */}
+            <button
+              type="submit"
+              disabled={!input.trim() || isGenerating}
+              className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white disabled:text-slate-500 rounded-xl transition-all shadow-md shadow-indigo-600/20 disabled:shadow-none flex items-center space-x-1 text-xs font-bold shrink-0 ml-auto"
+              title="AI回答を生成 (Enterで送信)"
+            >
+              <span>送信</span>
+              <Send className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </form>
       </div>
 

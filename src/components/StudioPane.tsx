@@ -386,17 +386,19 @@ ${currentArtifact.content}
             onClick={() => handleGenerateClick()}
             disabled={isGeneratingStudio || enabledDocsCount === 0}
             title={enabledDocsCount === 0 ? '左側の資料一覧から対象ドキュメントにチェックを入れてください' : undefined}
-            className="flex-1 py-2.5 px-4 bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 disabled:from-slate-800 disabled:to-slate-800 text-white disabled:text-slate-500 rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-2 shadow-md hover:shadow-indigo-500/20 active:scale-[0.99] disabled:cursor-not-allowed"
+            className="flex-1 py-3 px-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-300 dark:disabled:bg-slate-800 text-white disabled:text-slate-700 dark:disabled:text-slate-400 rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-2 shadow-md hover:shadow-indigo-500/25 active:scale-[0.99] disabled:cursor-not-allowed border border-transparent disabled:border-slate-400/30 dark:disabled:border-slate-700/50"
           >
             {isGeneratingStudio ? (
               <>
-                <Loader2 className="w-4 h-4 animate-spin text-indigo-300" />
-                <span>✨ {currentTabObj.label} を解析・生成中...</span>
+                <Loader2 className="w-4 h-4 animate-spin text-indigo-200" />
+                <span className="text-white font-bold">✨ {currentTabObj.label} を解析・生成中...</span>
               </>
             ) : (
               <>
-                <Zap className="w-3.5 h-3.5 text-amber-300 fill-amber-300" />
-                <span>⚡ 「{currentTabObj.label}」を今すぐ生成</span>
+                <Zap className={`w-3.5 h-3.5 ${enabledDocsCount === 0 ? 'text-slate-500' : 'text-amber-300 fill-amber-300'}`} />
+                <span className={enabledDocsCount === 0 ? 'text-slate-700 dark:text-slate-300 font-bold' : 'text-white font-bold'}>
+                  ⚡ 「{currentTabObj.label}」を今すぐ生成
+                </span>
               </>
             )}
           </button>
