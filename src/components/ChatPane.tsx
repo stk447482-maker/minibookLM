@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, Sparkles, ChevronDown, ChevronUp, FileText, Zap, PlusCircle, Trash2, RotateCcw, Mic, MicOff, Volume2, ExternalLink, X } from 'lucide-react';
+import { Send, Bot, User, Sparkles, ChevronDown, ChevronUp, FileText, Zap, PlusCircle, Trash2, RotateCcw, Mic, MicOff, Volume2, ExternalLink, X, Lightbulb } from 'lucide-react';
 import { MarkdownViewer } from './MarkdownViewer.tsx';
 import { ChatMessage, SourceReference } from '../types/index.ts';
 
@@ -142,13 +142,40 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             <div className="w-12 h-12 rounded-2xl bg-indigo-600/10 border border-indigo-500/20 flex items-center justify-center">
               <Sparkles className="w-6 h-6 text-indigo-400" />
             </div>
-            <div className="max-w-sm space-y-1">
+            <div className="max-w-md space-y-1">
               <h3 className="text-base font-semibold text-slate-200">
                 MiniBookLM チャット
               </h3>
               <p className="text-xs text-slate-400">
                 左側でドキュメントにチェックを入れて質問してください。「🤖 AI回答」または「🎯 厳密RAG抽出」を選択できます。
               </p>
+            </div>
+
+            {/* 🌟 スターター質問サジェスト */}
+            <div className="pt-2 w-full max-w-sm space-y-2">
+              <span className="text-[11px] font-bold text-slate-400 flex items-center justify-center gap-1">
+                <Sparkles className="w-3 h-3 text-indigo-400" />
+                <span>よくあるおすすめの質問:</span>
+              </span>
+              <div className="flex flex-col space-y-1.5 text-left">
+                {[
+                  '選択したドキュメント全体の要点を3行でまとめて',
+                  '資料内の重要な確定数値や期限・ルールを教えて',
+                  '注意すべき制約事項や例外条件は何ですか？'
+                ].map((starter, sIdx) => (
+                  <button
+                    key={sIdx}
+                    type="button"
+                    onClick={() => onSendMessage(starter, false)}
+                    className="p-2 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-800 hover:border-indigo-500/50 text-xs text-slate-300 hover:text-indigo-200 transition-all flex items-center space-x-2 group shadow-sm active:scale-95"
+                  >
+                    <span className="w-5 h-5 rounded-lg bg-indigo-500/10 text-indigo-400 flex items-center justify-center shrink-0 text-[10px] group-hover:bg-indigo-500 group-hover:text-white transition-colors">
+                      {sIdx + 1}
+                    </span>
+                    <span className="truncate">{starter}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         ) : (
@@ -223,6 +250,30 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                     setActiveReference(ref);
                   }}
                 />
+
+                {/* 💡 次の深掘り質問サジェストチップ */}
+                {msg.role === 'assistant' && !msg.isStreaming && msg.suggestedQuestions && msg.suggestedQuestions.length > 0 && (
+                  <div className="mt-3 pt-2 border-t border-slate-800/60 space-y-1.5">
+                    <span className="text-[10px] font-bold text-indigo-400 flex items-center gap-1">
+                      <Lightbulb className="w-3 h-3 text-amber-400 fill-amber-400/20" />
+                      <span>次に深掘りできるおすすめの問い:</span>
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {msg.suggestedQuestions.map((q, qIdx) => (
+                        <button
+                          key={qIdx}
+                          type="button"
+                          onClick={() => onSendMessage(q, false)}
+                          className="text-left text-[11px] px-2.5 py-1 rounded-lg bg-indigo-950/50 hover:bg-indigo-900/60 text-indigo-200 border border-indigo-500/30 hover:border-indigo-400/50 transition-all flex items-center space-x-1 shadow-sm active:scale-95"
+                          title="クリックしてこの質問をそのまま送信"
+                        >
+                          <span>👉</span>
+                          <span className="line-clamp-1">{q}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {/* アクションフッター (ソース追加・削除) */}
                 {msg.role === 'assistant' && !msg.isStreaming && (

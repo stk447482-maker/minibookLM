@@ -89,6 +89,7 @@ export interface ChatMessage {
   timestamp: number;
   sources?: SourceReference[];
   isStreaming?: boolean;
+  suggestedQuestions?: string[];
 }
 
 export type StudioTab =

@@ -295,10 +295,33 @@ ${searchResults.map((s, idx) => `[${idx + 1}] 資料: ${s.docTitle}\n${s.fullCon
         finalAnswer += `\n\n${graphSummary}`;
       }
 
+      // 回答末尾の【深掘りサジェスト質問】ブロックを抽出
+      let suggestedQuestions: string[] = [];
+      const suggestMatch = finalAnswer.match(/(?:【関連する深掘り質問】|【次に深掘りできる問い】|【おすすめの質問】|💡\s*関連質問)([\s\S]*)$/i);
+      if (suggestMatch && suggestMatch[1]) {
+        const lines = suggestMatch[1].split('\n')
+          .map(l => l.replace(/^[-*•\d.]+\s*/, '').trim())
+          .filter(l => l.length > 5 && (l.endsWith('？') || l.endsWith('?') || l.includes('ですか') || l.includes('について')));
+        if (lines.length > 0) {
+          suggestedQuestions = lines.slice(0, 3);
+        }
+      }
+
+      // サジェストがLLM側で出力されなかった場合のドキュメントキーワードベースのフォールバック
+      if (suggestedQuestions.length === 0 && searchResults.length > 0) {
+        const topDocs = activeDocTitles.slice(0, 2);
+        suggestedQuestions = [
+          `${topDocs[0] || '資料'}の重要ポイントを3行で要約して`,
+          `関連する留意点や例外規定はありますか？`,
+          `他の資料との関連性や背景を教えて`
+        ];
+      }
+
       const finalAssistantMsg: ChatMessage = {
         ...assistantMsg,
         content: finalAnswer,
-        isStreaming: false
+        isStreaming: false,
+        suggestedQuestions
       };
 
       setMessages(prev =>
