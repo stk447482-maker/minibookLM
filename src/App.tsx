@@ -350,6 +350,10 @@ export const App: React.FC = () => {
             onDeleteArtifact={handleDeleteArtifact}
             onAddToSource={handleAddContentToSource}
             onUpdateArtifact={handleUpdateArtifact}
+            onSelectGraphNode={(nodeName) => {
+              setActiveMobileTab('chat');
+              handleSendMessage(`「${nodeName}」に関する詳細情報、定義、および関連する記述を教えて`, false);
+            }}
             isGeneratingStudio={isGeneratingStudio}
           />
         </div>

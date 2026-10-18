@@ -5,9 +5,10 @@ import { DiagramService } from '../../services/diagramService.ts';
 
 interface Graph3DViewerProps {
   dataString: string;
+  onNodeClick?: (nodeName: string) => void;
 }
 
-export const Graph3DViewer: React.FC<Graph3DViewerProps> = ({ dataString }) => {
+export const Graph3DViewer: React.FC<Graph3DViewerProps> = ({ dataString, onNodeClick }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const graphInstanceRef = useRef<any>(null);
@@ -52,7 +53,12 @@ export const Graph3DViewer: React.FC<Graph3DViewerProps> = ({ dataString }) => {
       .linkOpacity(0.6)
       .linkColor(() => '#64748b')
       .linkDirectionalParticles(2)
-      .linkDirectionalParticleSpeed(0.006);
+      .linkDirectionalParticleSpeed(0.006)
+      .onNodeClick((node: any) => {
+        if (node && node.name && onNodeClick) {
+          onNodeClick(node.name);
+        }
+      });
 
     graphInstanceRef.current = Graph;
 

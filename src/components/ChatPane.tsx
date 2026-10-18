@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, Sparkles, ChevronDown, ChevronUp, FileText, Zap, PlusCircle, Trash2, RotateCcw, Mic, MicOff, Volume2, ExternalLink, X, Lightbulb } from 'lucide-react';
+import { Send, Bot, User, Sparkles, ChevronDown, ChevronUp, FileText, Zap, PlusCircle, Trash2, RotateCcw, Mic, MicOff, Volume2, ExternalLink, X, Lightbulb, Headphones } from 'lucide-react';
 import { MarkdownViewer } from './MarkdownViewer.tsx';
 import { ChatMessage, SourceReference } from '../types/index.ts';
 
@@ -36,45 +36,12 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isGenerating, statusMessage]);
 
-  // 音声入力 (STT: Web Speech Recognition API)
-  const toggleListening = () => {
-    if (isListening) {
-      if (recognitionRef.current) recognitionRef.current.stop();
-      setIsListening(false);
-      return;
-    }
-
-    const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRec) {
-      alert('お使いのブラウザは音声入力 (Web Speech API) に対応していません。Chrome / Edge / Safari等をお試しください。');
-      return;
-    }
-
-    try {
-      const recognition = new SpeechRec();
-      recognition.lang = 'ja-JP';
-      recognition.continuous = false;
-      recognition.interimResults = true;
-
-      recognition.onstart = () => setIsListening(true);
-      recognition.onresult = (e: any) => {
-        const transcript = Array.from(e.results)
-          .map((result: any) => result[0].transcript)
-          .join('');
-        setInput(prev => (prev ? prev + ' ' : '') + transcript);
-      };
-      recognition.onerror = () => setIsListening(false);
-      recognition.onend = () => setIsListening(false);
-
-      recognitionRef.current = recognition;
-      recognition.start();
-    } catch {
-      setIsListening(false);
-    }
-  };
+  const [isHandsFree, setIsHandsFree] = useState(false);
+  const isHandsFreeRef = useRef(false);
+  isHandsFreeRef.current = isHandsFree;
 
   // 音声読み上げ (TTS: SpeechSynthesis)
-  const handleSpeak = (msgId: string, text: string) => {
+  const handleSpeak = (msgId: string, text: string, onFinish?: () => void) => {
     if (!('speechSynthesis' in window)) return;
 
     if (speakingMsgId === msgId) {
@@ -90,11 +57,101 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     utterance.lang = 'ja-JP';
     utterance.rate = 1.05;
 
-    utterance.onend = () => setSpeakingMsgId(null);
-    utterance.onerror = () => setSpeakingMsgId(null);
+    utterance.onend = () => {
+      setSpeakingMsgId(null);
+      if (onFinish) onFinish();
+    };
+    utterance.onerror = () => {
+      setSpeakingMsgId(null);
+      if (onFinish) onFinish();
+    };
 
     setSpeakingMsgId(msgId);
     window.speechSynthesis.speak(utterance);
+  };
+
+  // ハンズフリー自動応答（AI回答ストリーミング完了時、ハンズフリー中なら自動で音声読み上げを開始）
+  const lastSpokenMsgIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isHandsFreeRef.current || isGenerating) return;
+
+    const lastMsg = messages[messages.length - 1];
+    if (lastMsg && lastMsg.role === 'assistant' && !lastMsg.isStreaming && lastSpokenMsgIdRef.current !== lastMsg.id) {
+      lastSpokenMsgIdRef.current = lastMsg.id;
+      // 回答完了を読み上げ、終了後に自動でマイク入力再開
+      handleSpeak(lastMsg.id, lastMsg.content, () => {
+        if (isHandsFreeRef.current) {
+          startListeningOnce();
+        }
+      });
+    }
+  }, [messages, isGenerating]);
+
+  // 音声入力開始（単発またはハンズフリー用）
+  const startListeningOnce = () => {
+    const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRec) return;
+
+    try {
+      if (recognitionRef.current) {
+        recognitionRef.current.abort();
+      }
+      const recognition = new SpeechRec();
+      recognition.lang = 'ja-JP';
+      recognition.continuous = false;
+      recognition.interimResults = false;
+
+      recognition.onstart = () => setIsListening(true);
+      recognition.onresult = (e: any) => {
+        const transcript = Array.from(e.results)
+          .map((result: any) => result[0].transcript)
+          .join('').trim();
+        if (transcript) {
+          setInput(transcript);
+          setIsListening(false);
+          // ハンズフリーモード時は自動送信
+          if (isHandsFreeRef.current) {
+            onSendMessage(transcript, false);
+            setInput('');
+          }
+        }
+      };
+      recognition.onerror = () => {
+        setIsListening(false);
+      };
+      recognition.onend = () => {
+        setIsListening(false);
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+    } catch {
+      setIsListening(false);
+    }
+  };
+
+  // 通常の音声トグル
+  const toggleListening = () => {
+    if (isListening) {
+      if (recognitionRef.current) recognitionRef.current.stop();
+      setIsListening(false);
+      return;
+    }
+    startListeningOnce();
+  };
+
+  // ハンズフリーモードのトグル
+  const toggleHandsFree = () => {
+    if (isHandsFree) {
+      setIsHandsFree(false);
+      if (recognitionRef.current) recognitionRef.current.stop();
+      window.speechSynthesis?.cancel();
+      setIsListening(false);
+      setSpeakingMsgId(null);
+    } else {
+      setIsHandsFree(true);
+      startListeningOnce();
+    }
   };
 
   const handleSubmit = (e: React.FormEvent, isDirectRAG: boolean = false) => {
@@ -350,6 +407,21 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
           <button
             type="button"
+            onClick={toggleHandsFree}
+            disabled={isGenerating}
+            className={`p-3 rounded-xl border transition-all shrink-0 flex items-center justify-center space-x-1 ${
+              isHandsFree
+                ? 'bg-purple-600 text-white border-purple-400 animate-pulse shadow-lg shadow-purple-600/30'
+                : 'bg-slate-800 hover:bg-slate-750 text-slate-400 hover:text-purple-300 border-slate-700'
+            }`}
+            title={isHandsFree ? "ハンズフリー通話モードを停止" : "🎧 ハンズフリー通話モードを開始（声で話す ➔ AI回答 ➔ 自動音声再生 ➔ 自動で次の待ち受けへ）"}
+          >
+            <Headphones className="w-4 h-4" />
+            <span className="text-[10px] font-bold hidden md:inline">{isHandsFree ? '通話中' : '通話'}</span>
+          </button>
+
+          <button
+            type="button"
             onClick={toggleListening}
             disabled={isGenerating}
             className={`p-3 rounded-xl border transition-all shrink-0 flex items-center justify-center ${
@@ -357,7 +429,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                 ? 'bg-rose-600 text-white border-rose-500 animate-pulse shadow-lg shadow-rose-600/30'
                 : 'bg-slate-800 hover:bg-slate-750 text-slate-400 hover:text-slate-200 border-slate-700'
             }`}
-            title={isListening ? "音声入力を終了" : "音声で話しかける (ハンズフリー音声チャット)"}
+            title={isListening ? "音声入力を終了" : "音声で話しかける (単発音声入力)"}
           >
             {isListening ? <MicOff className="w-4 h-4 text-white" /> : <Mic className="w-4 h-4" />}
           </button>
